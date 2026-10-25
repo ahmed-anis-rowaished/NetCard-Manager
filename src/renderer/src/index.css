@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-space-darkest text-slate-100 font-cairo;
+  }
+}
+
+/* Custom Scrollbar for Space Theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1e0b36;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #4a217b;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a855f7;
+}
+
+/* Glass panel effects */
+.glass-panel {
+  background: rgba(45, 18, 77, 0.75);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  box-shadow: 0 8px 32px 0 rgba(19, 6, 36, 0.5);
+}
+
+.glass-card {
+  background: rgba(52, 22, 89, 0.65);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(168, 85, 247, 0.18);
+}
+
+.neon-border {
+  border-color: #a855f7;
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.35);
+}
+
+.neon-border-pink {
+  border-color: #ec4899;
+  box-shadow: 0 0 10px rgba(236, 72, 153, 0.35);
+}
+
+.neon-border-emerald {
+  border-color: #10b981;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.35);
+}
