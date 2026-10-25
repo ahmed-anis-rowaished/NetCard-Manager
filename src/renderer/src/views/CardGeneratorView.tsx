@@ -142,7 +142,9 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
       const unsub = window.netcardAPI.onGeneratorProgress((p) => {
         setProgress(p);
       });
-      return () => unsub();
+      return () => {
+        unsub();
+      };
     }
   }, []);
 

@@ -124,7 +124,7 @@ export class MikroTikClient {
       `=response=${responseHex}`,
     ]);
 
-    if (res2.length > 0 && res2[res.length - 1].type === '!done') {
+    if (res2.length > 0 && res2[res2.length - 1].type === '!done') {
       return true;
     }
     throw new Error('فشل تسجيل الدخول القديم (Legacy Login)');

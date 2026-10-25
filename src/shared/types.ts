@@ -208,6 +208,7 @@ export interface GeneratedCard {
   custom2?: string;
   templateId?: number;
   posId?: number;
+  sharedUsers?: number;
   isPrinted: boolean;
   createdAt: string;
   routerIp?: string;

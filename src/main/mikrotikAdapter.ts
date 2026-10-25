@@ -116,6 +116,9 @@ export class MikroTikAdapter {
         // e.g. "1000M" or "1G"
         s.push(`=limit-bytes-total=${this.parseDataLimitToBytes(card.dataLimit)}`);
       }
+      if ((card as any).mac) {
+        s.push(`=mac-address=${(card as any).mac}`);
+      }
       s.push(`=comment=NetCard_Batch_${card.batchId}`);
 
       return s;

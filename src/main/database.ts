@@ -46,7 +46,10 @@ export class AppDatabase {
 
   public async initialize(): Promise<void> {
     const SQL = await initSqlJs();
-    const userDataPath = app ? app.getPath('userData') : path.resolve(__dirname, '..', 'data');
+    const userDataPath =
+      app && typeof app.getPath === 'function'
+        ? app.getPath('userData')
+        : path.resolve(process.env.USERPROFILE || process.env.HOME || '.', '.netcard_data');
     if (!fs.existsSync(userDataPath)) {
       fs.mkdirSync(userDataPath, { recursive: true });
     }
