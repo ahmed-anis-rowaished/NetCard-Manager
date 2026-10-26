@@ -45,7 +45,17 @@ export class AppDatabase {
   private dbPath: string = '';
 
   public async initialize(): Promise<void> {
-    const SQL = await initSqlJs();
+    const SQL = await initSqlJs({
+      locateFile: (file) => {
+        const localPath = path.join(__dirname, file);
+        if (fs.existsSync(localPath)) return localPath;
+        if (app && app.isPackaged) {
+          const resPath = path.join(process.resourcesPath, file);
+          if (fs.existsSync(resPath)) return resPath;
+        }
+        return path.join(__dirname, '../../node_modules/sql.js/dist', file);
+      },
+    });
     const userDataPath =
       app && typeof app.getPath === 'function'
         ? app.getPath('userData')

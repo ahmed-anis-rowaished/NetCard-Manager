@@ -16,6 +16,9 @@ export default defineConfig({
             outDir: 'dist-electron',
             rollupOptions: {
               external: ['sql.js', 'canvas-confetti', 'fsevents'],
+              output: {
+                entryFileNames: 'main.js',
+              },
             },
           },
         },
@@ -30,6 +33,11 @@ export default defineConfig({
         vite: {
           build: {
             outDir: 'dist-electron',
+            rollupOptions: {
+              output: {
+                entryFileNames: 'preload.js',
+              },
+            },
           },
         },
       },

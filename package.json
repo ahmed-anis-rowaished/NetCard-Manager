@@ -5,7 +5,8 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "copy-wasm": "node -e \"const fs=require('fs'); fs.copyFileSync('node_modules/sql.js/dist/sql-wasm.wasm', 'dist-electron/sql-wasm.wasm');\"",
+    "build": "tsc && vite build && npm run copy-wasm",
     "preview": "vite preview",
     "electron:build": "npm run build && electron-builder"
   },
@@ -60,5 +61,41 @@
     "vite": "^5.4.10",
     "vite-plugin-electron": "^0.28.8",
     "vite-plugin-electron-renderer": "^0.14.6"
+  },
+  "build": {
+    "appId": "com.netcard.manager",
+    "productName": "NetCard Manager",
+    "copyright": "Copyright © 2026 NetCard Architect",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/sql.js/dist/sql-wasm.wasm",
+        "to": "sql-wasm.wasm"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "NetCard Manager",
+      "runAfterFinish": true
+    }
   }
 }
