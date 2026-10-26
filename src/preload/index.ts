@@ -58,6 +58,7 @@ const netcardAPI = {
   // System
   selectDirectory: () => ipcRenderer.invoke('system:selectDirectory'),
   selectImage: () => ipcRenderer.invoke('system:selectImage'),
+  fileToDataUrl: (filePath: string) => ipcRenderer.invoke('system:fileToDataUrl', filePath),
   openPath: (targetPath: string) => ipcRenderer.invoke('system:openPath', targetPath),
   getFirewallProtectionScript: () => ipcRenderer.invoke('system:getFirewallProtectionScript'),
 };

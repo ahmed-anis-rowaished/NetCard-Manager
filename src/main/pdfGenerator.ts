@@ -18,7 +18,7 @@ export class PdfGenerator {
     }
 
     try {
-      // Primary High-Fidelity Engine: Chromium Native PrintToPDF (100% Arabic RTL Shaping & 300 DPI)
+      // Primary High-Fidelity Engine: Chromium Native PrintToPDF (100% Offline Arabic RTL & 300 DPI)
       return await this.generateViaChromium(cards, template, outputPath);
     } catch (err: any) {
       console.warn('[PdfGenerator] Falling back to jsPDF engine due to:', err.message);
@@ -27,9 +27,38 @@ export class PdfGenerator {
   }
 
   /**
-   * Generates production-grade A4 PDF using Chromium's HarfBuzz text shaping engine.
-   * Produces 100% native connected Arabic typography with Cairo & Tajawal fonts,
-   * matching the on-screen preview to the millimeter.
+   * Resolves an image input (Base64 data URI or local filesystem path)
+   * into a valid DataURL image that Chromium can display offline without security blocks.
+   */
+  private static resolveImageData(imageOrPath?: string): string | undefined {
+    if (!imageOrPath) return undefined;
+    if (imageOrPath.startsWith('data:image/')) return imageOrPath;
+
+    let cleanPath = imageOrPath.trim();
+    if (cleanPath.startsWith('file:///')) {
+      cleanPath = cleanPath.slice(8);
+    } else if (cleanPath.startsWith('file://')) {
+      cleanPath = cleanPath.slice(7);
+    }
+
+    if (fs.existsSync(cleanPath)) {
+      try {
+        const buffer = fs.readFileSync(cleanPath);
+        const ext = path.extname(cleanPath).slice(1).toLowerCase();
+        const mime = ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+        return `data:${mime};base64,${buffer.toString('base64')}`;
+      } catch (err) {
+        console.warn('[PdfGenerator] Could not read local image file:', cleanPath);
+        return undefined;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Generates production-grade A4 PDF completely OFFLINE without external web font dependencies.
+   * Uses Chromium's native text shaper with system Arabic fonts (Cairo, Tajawal, Segoe UI, Tahoma, Arial)
+   * for zero latency and pristine connected RTL typography.
    */
   private static async generateViaChromium(
     cards: GeneratedCard[],
@@ -44,6 +73,15 @@ export class PdfGenerator {
     const marginV = template.marginVerticalMm || 4;
 
     const totalPages = Math.ceil(cards.length / cardsPerPage);
+
+    // Resolve background and logo images to DataURLs
+    const resolvedBgData = template.hasBackgroundImage
+      ? this.resolveImageData(template.backgroundImageData)
+      : undefined;
+
+    const resolvedLogoData = template.hasLogo
+      ? this.resolveImageData(template.logoImageData)
+      : undefined;
 
     // Pre-generate Barcodes / QR codes
     const barcodeMap = new Map<string, string>();
@@ -161,7 +199,7 @@ export class PdfGenerator {
                 position: absolute;
                 left: ${el.xMm}mm;
                 top: ${el.yMm}mm;
-                font-family: '${el.fontFamily}', Cairo, Tajawal, sans-serif;
+                font-family: '${el.fontFamily}', 'Cairo', 'Tajawal', 'Segoe UI', Tahoma, Arial, sans-serif;
                 font-size: ${el.fontSizePt * 1.33}px;
                 color: ${el.fontColor || '#000000'};
                 font-style: ${fontStyle};
@@ -178,15 +216,13 @@ export class PdfGenerator {
           ? `border: ${template.borderSizePx || 1}px solid ${template.borderColor || '#D1D5DB'};`
           : '';
 
-        const bgImageStyle =
-          template.hasBackgroundImage && template.backgroundImageData
-            ? `background-image: url('${template.backgroundImageData}'); background-size: cover; background-position: center;`
-            : 'background-color: #ffffff;';
+        const bgImageStyle = resolvedBgData
+          ? `background-image: url('${resolvedBgData}'); background-size: cover; background-position: center;`
+          : 'background-color: #ffffff;';
 
-        const logoHtml =
-          template.hasLogo && template.logoImageData
-            ? `<img src="${template.logoImageData}" style="position: absolute; left: 2mm; top: 2mm; width: 10mm; height: 10mm; object-fit: contain;" />`
-            : '';
+        const logoHtml = resolvedLogoData
+          ? `<img src="${resolvedLogoData}" style="position: absolute; left: 2mm; top: 2mm; width: 10mm; height: 10mm; object-fit: contain;" />`
+          : '';
 
         cardsHtml += `
           <div style="
@@ -213,7 +249,7 @@ export class PdfGenerator {
             right: 0;
             top: ${template.pageNumberY || 290}mm;
             text-align: center;
-            font-family: 'Cairo', sans-serif;
+            font-family: 'Cairo', 'Tajawal', 'Segoe UI', Tahoma, sans-serif;
             font-size: 10px;
             color: #64748B;
           ">صفحة ${pageNum} من ${totalPages}</div>`
@@ -240,7 +276,6 @@ export class PdfGenerator {
         <head>
           <meta charset="utf-8">
           <style>
-            @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Tajawal:wght@400;500;700;800&display=swap');
             @page {
               size: A4 portrait;
               margin: 0;
@@ -248,8 +283,10 @@ export class PdfGenerator {
             body {
               margin: 0;
               padding: 0;
+              font-family: 'Cairo', 'Tajawal', 'Segoe UI', Tahoma, Arial, sans-serif;
               -webkit-print-color-adjust: exact;
               print-color-adjust: exact;
+              background-color: #ffffff;
             }
             * {
               box-sizing: border-box;

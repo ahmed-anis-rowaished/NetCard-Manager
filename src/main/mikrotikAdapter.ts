@@ -101,18 +101,33 @@ export class MikroTikAdapter {
     const errors: string[] = [];
 
     // If bindMacOnFirstUse is active, configure the profile's on-login script to automatically bind MAC
+    // Safely preserve and append to existing on-login scripts without overwriting
     if (options.bindMacOnFirstUse && cards.length > 0) {
       const targetProfile = cards[0].profile || 'default';
       try {
-        const onLoginScript =
-          '{ :local mac $"mac-address"; /ip hotspot user set [find name=$user] mac-address=$mac }';
-        await this.client.writeSentence([
-          '/ip/hotspot/user/profile/set',
-          `=numbers=${targetProfile}`,
-          `=on-login=${onLoginScript}`,
+        const profRes = await this.client.writeSentence([
+          '/ip/hotspot/user/profile/print',
+          `?name=${targetProfile}`,
         ]);
+        const profItem = profRes.find((r) => r.type === '!re');
+        const existingOnLogin = profItem?.attributes['on-login'] || '';
+        const lockCode =
+          '{ :local mac $"mac-address"; /ip hotspot user set [find name=$user] mac-address=$mac }';
+
+        if (!existingOnLogin.includes('mac-address=$mac')) {
+          const combinedScript = existingOnLogin.trim()
+            ? `${existingOnLogin.trim()}\r\n${lockCode}`
+            : lockCode;
+
+          const profileIdentifier = profItem?.attributes['.id'] || targetProfile;
+          await this.client.writeSentence([
+            '/ip/hotspot/user/profile/set',
+            `=.id=${profileIdentifier}`,
+            `=on-login=${combinedScript}`,
+          ]);
+        }
       } catch (err: any) {
-        console.warn('[Hotspot Profile on-login] Note:', err.message);
+        console.warn('[Hotspot Profile on-login preservation] Note:', err.message);
       }
     }
 
@@ -410,9 +425,12 @@ export class MikroTikAdapter {
     if (mode === 'hotspot') {
       if (options?.bindMacOnFirstUse && cards.length > 0) {
         const prof = cards[0].profile || 'default';
-        lines.push('# إعداد القفل التلقائي للماك أدرس عند أول تسجيل دخول');
+        lines.push('# إعداد القفل التلقائي للماك أدرس عند أول تسجيل دخول مع الحفاظ على السكربتات السابقة');
         lines.push(
-          `/ip hotspot user profile set [find name="${prof}"] on-login="{ :local mac $\\"mac-address\\"; /ip hotspot user set [find name=$user] mac-address=$mac }"`
+          `:local curScript [/ip hotspot user profile get [find name="${prof}"] on-login]`
+        );
+        lines.push(
+          `:if ([:find $curScript "mac-address=\\$mac"] = -1) do={ /ip hotspot user profile set [find name="${prof}"] on-login=($curScript . "\\r\\n{ :local mac $\\"mac-address\\"; /ip hotspot user set [find name=$user] mac-address=$mac }") }`
         );
         lines.push('');
       }

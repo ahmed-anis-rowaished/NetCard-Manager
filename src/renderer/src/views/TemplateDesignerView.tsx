@@ -64,13 +64,30 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
     loadTemplates();
   }, []);
 
+  const ensureImageDataUrls = async (tmpl: CardTemplate): Promise<CardTemplate> => {
+    let bg = tmpl.backgroundImageData;
+    let logo = tmpl.logoImageData;
+
+    if (bg && !bg.startsWith('data:') && window.netcardAPI?.fileToDataUrl) {
+      const converted = await window.netcardAPI.fileToDataUrl(bg);
+      if (converted) bg = converted;
+    }
+    if (logo && !logo.startsWith('data:') && window.netcardAPI?.fileToDataUrl) {
+      const converted = await window.netcardAPI.fileToDataUrl(logo);
+      if (converted) logo = converted;
+    }
+
+    return { ...tmpl, backgroundImageData: bg, logoImageData: logo };
+  };
+
   const loadTemplates = async () => {
     try {
       if (window.netcardAPI) {
         const list = await window.netcardAPI.getTemplates();
         if (list.length > 0) {
           setTemplates(list);
-          setTemplate(list[0]);
+          const resolved = await ensureImageDataUrls(list[0]);
+          setTemplate(resolved);
           setSelectedTemplateId(list[0].id);
         } else {
           setTemplates([DEFAULT_TEMPLATE]);
@@ -82,11 +99,12 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
     }
   };
 
-  const handleSelectTemplate = (id: number) => {
+  const handleSelectTemplate = async (id: number) => {
     const found = templates.find((t) => t.id === id);
     if (found) {
       setSelectedTemplateId(id);
-      setTemplate(JSON.parse(JSON.stringify(found)));
+      const resolved = await ensureImageDataUrls(JSON.parse(JSON.stringify(found)));
+      setTemplate(resolved);
     }
   };
 

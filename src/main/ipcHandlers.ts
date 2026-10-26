@@ -413,8 +413,28 @@ export function setupIpcHandlers(
     if (!res.canceled && res.filePaths.length > 0) {
       const filePath = res.filePaths[0];
       const buffer = fs.readFileSync(filePath);
-      const ext = path.extname(filePath).slice(1);
-      return `data:image/${ext};base64,${buffer.toString('base64')}`;
+      const ext = path.extname(filePath).slice(1).toLowerCase();
+      const mime = ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+      return `data:${mime};base64,${buffer.toString('base64')}`;
+    }
+    return null;
+  });
+
+  ipcMain.handle('system:fileToDataUrl', async (_, filePath: string) => {
+    if (!filePath) return null;
+    let clean = filePath;
+    if (clean.startsWith('file:///')) clean = clean.slice(8);
+    else if (clean.startsWith('file://')) clean = clean.slice(7);
+
+    if (fs.existsSync(clean)) {
+      try {
+        const buffer = fs.readFileSync(clean);
+        const ext = path.extname(clean).slice(1).toLowerCase();
+        const mime = ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+        return `data:${mime};base64,${buffer.toString('base64')}`;
+      } catch (err) {
+        return null;
+      }
     }
     return null;
   });
