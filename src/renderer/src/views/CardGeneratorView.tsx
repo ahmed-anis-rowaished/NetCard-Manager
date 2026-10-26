@@ -49,6 +49,7 @@ interface CardGeneratorViewProps {
   onOpenProfileModal: () => void;
   onOpenTemplateDesigner: () => void;
   onOpenFirewallModal: () => void;
+  onOpenProfilesManager?: () => void;
 }
 
 export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
@@ -62,18 +63,54 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
   onOpenProfileModal,
   onOpenTemplateDesigner,
   onOpenFirewallModal,
+  onOpenProfilesManager,
 }) => {
   // Service mode tab
   const [mode, setMode] = useState<MikroTikServiceMode>('hotspot');
+
+  // Templates state
+  const [currentTemplatesList, setCurrentTemplatesList] = useState<CardTemplate[]>(templates);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number>(templates[0]?.id || 1);
 
   // Reciprocal input method state
   const [inputMethod, setInputMethod] = useState<'cards' | 'pages'>('pages');
   const [pagesCount, setPagesCount] = useState<number>(1);
   const [cardsCount, setCardsCount] = useState<number>(51);
 
-  // Template & POS
-  const [selectedTemplateId, setSelectedTemplateId] = useState<number>(templates[0]?.id || 1);
-  const currentTemplate = templates.find((t) => t.id === selectedTemplateId) || templates[0];
+  // Load latest templates from database on mount
+  const loadLatestTemplates = async () => {
+    if (!window.netcardAPI) return;
+    try {
+      const tmpls: CardTemplate[] = await window.netcardAPI.getTemplates();
+      if (tmpls && tmpls.length > 0) {
+        setCurrentTemplatesList(tmpls);
+        const exists = tmpls.find((t: CardTemplate) => t.id === selectedTemplateId);
+        if (!exists) {
+          setSelectedTemplateId(tmpls[0].id || 1);
+          const cpp = tmpls[0].cardsPerPage || 51;
+          if (inputMethod === 'pages') setCardsCount(pagesCount * cpp);
+          else setPagesCount(Math.ceil(cardsCount / cpp));
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load templates:', e);
+    }
+  };
+
+  useEffect(() => {
+    loadLatestTemplates();
+  }, []);
+
+  useEffect(() => {
+    if (templates && templates.length > 0) {
+      setCurrentTemplatesList(templates);
+    }
+  }, [templates]);
+
+  const currentTemplate =
+    currentTemplatesList.find((t) => t.id === selectedTemplateId) ||
+    currentTemplatesList[0] ||
+    templates[0];
   const cardsPerPage = currentTemplate?.cardsPerPage || 51;
 
   // Selected Profile
@@ -138,7 +175,7 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
 
   const handleTemplateChange = (tmplId: number) => {
     setSelectedTemplateId(tmplId);
-    const tmpl = templates.find((t) => t.id === tmplId);
+    const tmpl = currentTemplatesList.find((t) => t.id === tmplId);
     const cpp = tmpl?.cardsPerPage || 51;
     if (inputMethod === 'pages') {
       setCardsCount(pagesCount * cpp);
@@ -434,8 +471,8 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
                 </span>
                 <button
                   type="button"
-                  onClick={onOpenProfileModal}
-                  title="إضافة باقة جديدة"
+                  onClick={onOpenProfilesManager || onOpenProfileModal}
+                  title="إضافة وتعديل الباقات"
                   className="flex items-center gap-0.5 text-[10px] text-space-accent hover:underline"
                 >
                   <Plus className="w-3 h-3" />
@@ -499,7 +536,7 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
                 onChange={(e) => handleTemplateChange(parseInt(e.target.value, 10))}
                 className="w-full bg-space-darkest border border-space-border text-xs rounded-lg py-1.5 px-2.5 text-white"
               >
-                {templates.map((t) => (
+                {currentTemplatesList.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.name} ({t.cardsPerPage} كرت)
                   </option>

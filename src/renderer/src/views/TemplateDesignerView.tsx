@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   LayoutTemplate,
   Plus,
+  Copy,
   Save,
   Trash2,
   Eye,
@@ -53,6 +54,14 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
   // New Template Modal State (Replacing window.prompt)
   const [isNewTemplateModalOpen, setIsNewTemplateModalOpen] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState('');
+
+  // Duplicate Template Modal State
+  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
+  const [duplicateTemplateName, setDuplicateTemplateName] = useState('');
+
+  // View Mode: Single Card vs Full A4 Grid Preview
+  const [viewMode, setViewMode] = useState<'single' | 'grid'>('single');
+  const [gridScale, setGridScale] = useState<number>(0.75);
 
   // Delete Confirm Modal State
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -131,6 +140,38 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
       setTemplate(newTmpl);
       setIsNewTemplateModalOpen(false);
       showFeedback('تم إنشاء القالب الجديد بنجاح', 'success');
+    }
+  };
+
+  const handleOpenDuplicateModal = () => {
+    setDuplicateTemplateName(`نسخة من ${template.name}`);
+    setIsDuplicateModalOpen(true);
+  };
+
+  const handleConfirmDuplicateTemplate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!duplicateTemplateName.trim()) return;
+
+    try {
+      const clonedTemplate: CardTemplate = {
+        ...JSON.parse(JSON.stringify(template)),
+        id: undefined,
+        name: duplicateTemplateName.trim(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (window.netcardAPI) {
+        const newId = await window.netcardAPI.saveTemplate(clonedTemplate);
+        clonedTemplate.id = newId;
+        await loadTemplates();
+        setSelectedTemplateId(newId);
+        const resolved = await ensureImageDataUrls(clonedTemplate);
+        setTemplate(resolved);
+        setIsDuplicateModalOpen(false);
+        showFeedback(`تم نسخ القالب بنجاح باسم: ${clonedTemplate.name}`, 'success');
+      }
+    } catch (err: any) {
+      showFeedback(`فشل نسخ القالب: ${err.message}`, 'error');
     }
   };
 
@@ -283,10 +324,10 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
 
   return (
     <div
-      className="h-[calc(100vh-4rem)] flex flex-col p-4 gap-3 select-none overflow-hidden"
+      className="h-[calc(100vh-130px)] flex flex-col p-4 gap-3 select-none overflow-hidden"
       onMouseUp={handleMouseUp}
     >
-      {/* 1. TOP BAR: Template Dropdown & 4 Buttons */}
+      {/* 1. TOP BAR: Template Dropdown & Action Buttons */}
       <div className="glass-panel rounded-xl px-4 py-2.5 flex items-center justify-between border border-space-border shrink-0">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
@@ -318,7 +359,7 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
           />
         </div>
 
-        {/* 4 Colored Action Buttons */}
+        {/* Action Buttons */}
         <div className="flex items-center gap-2">
           {statusMsg && (
             <span
@@ -334,15 +375,23 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
 
           <button
             onClick={handleOpenNewTemplateModal}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-neon-emerald"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-neon-emerald"
           >
             <Plus className="w-4 h-4" />
             <span>إضافة قالب</span>
           </button>
 
           <button
+            onClick={handleOpenDuplicateModal}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-md shadow-indigo-950/40"
+          >
+            <Copy className="w-4 h-4" />
+            <span>نسخ القالب</span>
+          </button>
+
+          <button
             onClick={handleSaveTemplate}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all"
           >
             <Save className="w-4 h-4" />
             <span>حفظ القالب</span>
@@ -350,28 +399,30 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
 
           <button
             onClick={() => setIsDeleteModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-red-600/80 hover:bg-red-500 text-white text-xs font-bold transition-all"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600/80 hover:bg-red-500 text-white text-xs font-bold transition-all"
           >
             <Trash2 className="w-4 h-4" />
             <span>حذف</span>
           </button>
 
           <button
-            onClick={() => {
-              showFeedback('شبكة الطباعة مطابقة لمعاينة مساحة العمل تماماً', 'success');
-            }}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-neon-purple"
+            onClick={() => setViewMode(viewMode === 'single' ? 'grid' : 'single')}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-white text-xs font-bold transition-all shadow-neon-purple ${
+              viewMode === 'grid'
+                ? 'bg-gradient-to-r from-pink-600 to-rose-600'
+                : 'bg-purple-600 hover:bg-purple-500'
+            }`}
           >
-            <Eye className="w-4 h-4" />
-            <span>معاينة الشبكة</span>
+            {viewMode === 'grid' ? <LayoutTemplate className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            <span>{viewMode === 'grid' ? 'تصميم كرت مفرد' : 'معاينة الشبكة (A4 Grid)'}</span>
           </button>
         </div>
       </div>
 
       {/* MAIN BODY: 2-column flex workspace */}
       <div className="flex-1 flex gap-3 overflow-hidden">
-        {/* LEFT COLUMN: Template Settings, 11 Elements Toggles, Fonts & Dimensions */}
-        <div className="w-[420px] flex flex-col gap-3 overflow-y-auto pr-1 shrink-0">
+        {/* RIGHT COLUMN: Template Settings, 11 Elements Toggles, Fonts & Dimensions with independent smooth scroll */}
+        <div className="w-[420px] h-full overflow-y-auto pr-1 pb-6 space-y-3 shrink-0 scrollbar-thin">
           {/* Section: Template & File Settings */}
           <div className="glass-card rounded-xl p-3 space-y-2.5 border border-space-border/60">
             <h3 className="text-xs font-bold text-space-pink flex items-center gap-1.5 border-b border-space-border/40 pb-1.5">
@@ -836,82 +887,147 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Interactive Live Canvas Workspace */}
+        {/* RIGHT COLUMN: Interactive Live Canvas Workspace / A4 Grid Preview */}
         <div className="flex-1 glass-card rounded-2xl p-4 flex flex-col items-center justify-between border border-space-border/80 overflow-hidden relative">
           {/* Canvas Header & Zoom Slider */}
           <div className="w-full flex items-center justify-between border-b border-space-border/40 pb-2 mb-2">
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-space-accent" />
               <span className="text-xs font-bold text-white">
-                مساحة العمل والمعاينة الحية (Live Interactive Canvas)
+                {viewMode === 'single'
+                  ? 'مساحة العمل والمعاينة الحية للكرت المفرد (Interactive Canvas)'
+                  : `معاينة ورقة الطباعة الكاملة A4 (${template.cardsPerPage} كرت بالورقة)`}
               </span>
               <span className="text-[11px] text-purple-300">
-                اسحب أي عنصر بالماوس لتغيير مكانه بدقة
+                {viewMode === 'single'
+                  ? 'اسحب أي عنصر بالماوس لتغيير مكانه بدقة'
+                  : 'توزيع الكروت الفعلي على ورقة A4 قبل الحفظ والطباعة'}
               </span>
             </div>
 
             <div className="flex items-center gap-3">
-              <span className="text-[11px] text-purple-300 font-semibold">نسبة العرض:</span>
-              <input
-                type="range"
-                min="2.5"
-                max="5.5"
-                step="0.1"
-                value={previewZoom}
-                onChange={(e) => setPreviewZoom(parseFloat(e.target.value))}
-                className="w-24 accent-space-accent cursor-pointer"
-              />
-              <span className="text-xs font-mono text-space-cyan">
-                {Math.round(previewZoom * 25)}%
-              </span>
+              {viewMode === 'single' ? (
+                <>
+                  <span className="text-[11px] text-purple-300 font-semibold">نسبة العرض:</span>
+                  <input
+                    type="range"
+                    min="2.5"
+                    max="5.5"
+                    step="0.1"
+                    value={previewZoom}
+                    onChange={(e) => setPreviewZoom(parseFloat(e.target.value))}
+                    className="w-24 accent-space-accent cursor-pointer"
+                  />
+                  <span className="text-xs font-mono text-space-cyan">
+                    {Math.round(previewZoom * 25)}%
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="text-[11px] text-purple-300 font-semibold">حجم الورقة:</span>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="1.2"
+                    step="0.05"
+                    value={gridScale}
+                    onChange={(e) => setGridScale(parseFloat(e.target.value))}
+                    className="w-24 accent-space-accent cursor-pointer"
+                  />
+                  <span className="text-xs font-mono text-space-cyan">
+                    {Math.round(gridScale * 100)}%
+                  </span>
+                </>
+              )}
             </div>
           </div>
 
-          {/* Actual Interactive Card Container */}
-          <div className="flex-1 w-full flex items-center justify-center p-4 overflow-auto">
-            <div
-              ref={canvasRef}
-              onMouseMove={handleMouseMoveOnCanvas}
-              style={{
-                width: `${template.cardWidthMm * previewZoom}px`,
-                height: `${template.cardHeightMm * previewZoom}px`,
-                borderWidth: template.hasBorder ? `${template.borderSizePx || 1}px` : '0px',
-                borderColor: template.hasBorder ? template.borderColor : 'transparent',
-                backgroundImage:
-                  template.hasBackgroundImage && template.backgroundImageData
-                    ? `url(${template.backgroundImageData})`
-                    : undefined,
-                backgroundSize: 'cover',
-                backgroundPosition: 'center',
-              }}
-              className="bg-white rounded-md shadow-2xl relative select-none cursor-crosshair overflow-hidden border border-slate-300 transition-all"
-            >
-              {/* Logo Preview */}
-              {template.hasLogo && template.logoImageData && (
-                <img
-                  src={template.logoImageData}
-                  alt="Logo"
-                  className="absolute pointer-events-none"
-                  style={{
-                    left: `${2 * previewZoom}px`,
-                    top: `${2 * previewZoom}px`,
-                    width: `${10 * previewZoom}px`,
-                    height: `${10 * previewZoom}px`,
-                    objectFit: 'contain',
-                  }}
-                />
-              )}
+          {/* Actual Canvas Body */}
+          {viewMode === 'single' ? (
+            <div className="flex-1 w-full flex items-center justify-center p-4 overflow-auto">
+              <div
+                ref={canvasRef}
+                onMouseMove={handleMouseMoveOnCanvas}
+                style={{
+                  width: `${template.cardWidthMm * previewZoom}px`,
+                  height: `${template.cardHeightMm * previewZoom}px`,
+                  borderWidth: template.hasBorder ? `${template.borderSizePx || 1}px` : '0px',
+                  borderColor: template.hasBorder ? template.borderColor : 'transparent',
+                  backgroundImage:
+                    template.hasBackgroundImage && template.backgroundImageData
+                      ? `url(${template.backgroundImageData})`
+                      : undefined,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                }}
+                className="bg-white rounded-md shadow-2xl relative select-none cursor-crosshair overflow-hidden border border-slate-300 transition-all"
+              >
+                {/* Logo Preview */}
+                {template.hasLogo && template.logoImageData && (
+                  <img
+                    src={template.logoImageData}
+                    alt="Logo"
+                    className="absolute pointer-events-none"
+                    style={{
+                      left: `${2 * previewZoom}px`,
+                      top: `${2 * previewZoom}px`,
+                      width: `${10 * previewZoom}px`,
+                      height: `${10 * previewZoom}px`,
+                      objectFit: 'contain',
+                    }}
+                  />
+                )}
 
-              {/* Render Enabled Elements */}
-              {template.elements.map((el) => {
-                if (!el.enabled) return null;
-                const isSelected = el.id === selectedElementId;
+                {/* Render Enabled Elements */}
+                {template.elements.map((el) => {
+                  if (!el.enabled) return null;
+                  const isSelected = el.id === selectedElementId;
 
-                const leftPx = el.xMm * previewZoom;
-                const topPx = el.yMm * previewZoom;
+                  const leftPx = el.xMm * previewZoom;
+                  const topPx = el.yMm * previewZoom;
 
-                if (el.id === 'barcode') {
-                  const is1D = el.barcodeType === 'code128';
+                  if (el.id === 'barcode') {
+                    const is1D = el.barcodeType === 'code128';
+                    return (
+                      <div
+                        key={el.id}
+                        onMouseDown={(e) => handleMouseDownOnElement(e, el.id, el.xMm, el.yMm)}
+                        style={{
+                          left: `${leftPx}px`,
+                          top: `${topPx}px`,
+                          width: `${(el.barcodeWidthMm || (is1D ? 28 : 12)) * previewZoom}px`,
+                          height: `${(el.barcodeHeightMm || (is1D ? 10 : 12)) * previewZoom}px`,
+                        }}
+                        className={`absolute cursor-move flex items-center justify-center bg-slate-50 rounded border ${
+                          isSelected
+                            ? 'border-purple-600 ring-2 ring-purple-400 shadow-lg'
+                            : 'border-slate-300'
+                        }`}
+                      >
+                        {is1D ? (
+                          <div className="w-full h-full p-1 flex flex-col justify-between items-center bg-white">
+                            <div className="w-full h-4/5 flex justify-center items-center gap-0.5 px-1">
+                              <span className="w-1 h-full bg-black"></span>
+                              <span className="w-0.5 h-full bg-black"></span>
+                              <span className="w-1.5 h-full bg-black"></span>
+                              <span className="w-0.5 h-full bg-black"></span>
+                              <span className="w-1 h-full bg-black"></span>
+                              <span className="w-2 h-full bg-black"></span>
+                              <span className="w-0.5 h-full bg-black"></span>
+                            </div>
+                            <span className="text-[7px] font-mono text-black">84729103</span>
+                          </div>
+                        ) : (
+                          <div className="w-full h-full p-1 flex flex-col justify-between items-center bg-white">
+                            <div className="w-full h-full bg-slate-900 rounded-sm flex items-center justify-center text-[8px] text-white font-mono">
+                              QR
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+
                   return (
                     <div
                       key={el.id}
@@ -919,64 +1035,135 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
                       style={{
                         left: `${leftPx}px`,
                         top: `${topPx}px`,
-                        width: `${(el.barcodeWidthMm || (is1D ? 28 : 12)) * previewZoom}px`,
-                        height: `${(el.barcodeHeightMm || (is1D ? 10 : 12)) * previewZoom}px`,
+                        fontFamily: el.fontFamily,
+                        fontSize: `${el.fontSizePt * 1.3}px`,
+                        color: el.fontColor,
+                        fontWeight: el.isBold ? 'bold' : 'normal',
+                        fontStyle: el.isItalic ? 'italic' : 'normal',
                       }}
-                      className={`absolute cursor-move flex items-center justify-center bg-slate-50 rounded border ${
+                      className={`absolute cursor-move px-1 py-0.5 rounded transition-shadow leading-tight whitespace-nowrap ${
                         isSelected
-                          ? 'border-purple-600 ring-2 ring-purple-400 shadow-lg'
-                          : 'border-slate-300'
+                          ? 'bg-purple-500/20 ring-2 ring-purple-500 shadow-md'
+                          : 'hover:bg-purple-500/10'
                       }`}
                     >
-                      {is1D ? (
-                        <div className="w-full h-full p-1 flex flex-col justify-between items-center bg-white">
-                          <div className="w-full h-4/5 flex justify-center items-center gap-0.5 px-1">
-                            <span className="w-1 h-full bg-black"></span>
-                            <span className="w-0.5 h-full bg-black"></span>
-                            <span className="w-1.5 h-full bg-black"></span>
-                            <span className="w-0.5 h-full bg-black"></span>
-                            <span className="w-1 h-full bg-black"></span>
-                            <span className="w-2 h-full bg-black"></span>
-                            <span className="w-0.5 h-full bg-black"></span>
-                          </div>
-                          <span className="text-[7px] font-mono text-black">84729103</span>
-                        </div>
-                      ) : (
-                        <div className="w-full h-full p-1 flex flex-col justify-between items-center bg-white">
-                          <div className="w-full h-full bg-slate-900 rounded-sm flex items-center justify-center text-[8px] text-white font-mono">
-                            QR
-                          </div>
-                        </div>
-                      )}
+                      {getSampleTextForElement(el)}
                     </div>
                   );
-                }
-
-                return (
-                  <div
-                    key={el.id}
-                    onMouseDown={(e) => handleMouseDownOnElement(e, el.id, el.xMm, el.yMm)}
-                    style={{
-                      left: `${leftPx}px`,
-                      top: `${topPx}px`,
-                      fontFamily: el.fontFamily,
-                      fontSize: `${el.fontSizePt * 1.3}px`,
-                      color: el.fontColor,
-                      fontWeight: el.isBold ? 'bold' : 'normal',
-                      fontStyle: el.isItalic ? 'italic' : 'normal',
-                    }}
-                    className={`absolute cursor-move px-1 py-0.5 rounded transition-shadow leading-tight whitespace-nowrap ${
-                      isSelected
-                        ? 'bg-purple-500/20 ring-2 ring-purple-500 shadow-md'
-                        : 'hover:bg-purple-500/10'
-                    }`}
-                  >
-                    {getSampleTextForElement(el)}
-                  </div>
-                );
-              })}
+                })}
+              </div>
             </div>
-          </div>
+          ) : (
+            /* FULL A4 SHEET GRID PREVIEW */
+            <div className="flex-1 w-full flex items-center justify-center p-4 overflow-auto bg-space-darkest/90 rounded-xl">
+              <div
+                style={{
+                  width: `${210 * 3.78 * gridScale}px`,
+                  minHeight: `${297 * 3.78 * gridScale}px`,
+                  padding: `${8 * 3.78 * gridScale}px`,
+                }}
+                className="bg-white rounded shadow-2xl relative border border-slate-300 flex flex-col justify-between"
+              >
+                {/* Cards Grid */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: `repeat(${template.columnsCount}, minmax(0, 1fr))`,
+                    columnGap: `${template.marginHorizontalMm * 2.5 * gridScale}px`,
+                    rowGap: `${template.marginVerticalMm * 2.5 * gridScale}px`,
+                  }}
+                >
+                  {Array.from({ length: template.cardsPerPage }).map((_, cardIdx) => (
+                    <div
+                      key={cardIdx}
+                      style={{
+                        height: `${template.cardHeightMm * 2.5 * gridScale}px`,
+                        borderWidth: template.hasBorder ? `${template.borderSizePx || 1}px` : '0px',
+                        borderColor: template.hasBorder ? template.borderColor : 'transparent',
+                        backgroundImage:
+                          template.hasBackgroundImage && template.backgroundImageData
+                            ? `url(${template.backgroundImageData})`
+                            : undefined,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                      }}
+                      className="bg-white rounded-sm relative overflow-hidden border border-slate-200"
+                    >
+                      {/* Mini Logo */}
+                      {template.hasLogo && template.logoImageData && (
+                        <img
+                          src={template.logoImageData}
+                          alt="Logo"
+                          className="absolute pointer-events-none"
+                          style={{
+                            left: `${2 * 2.5 * gridScale}px`,
+                            top: `${2 * 2.5 * gridScale}px`,
+                            width: `${7 * 2.5 * gridScale}px`,
+                            height: `${7 * 2.5 * gridScale}px`,
+                            objectFit: 'contain',
+                          }}
+                        />
+                      )}
+
+                      {/* Render Enabled Elements scaled */}
+                      {template.elements.map((el) => {
+                        if (!el.enabled) return null;
+                        const leftPx = el.xMm * 2.5 * gridScale;
+                        const topPx = el.yMm * 2.5 * gridScale;
+
+                        if (el.id === 'barcode') {
+                          return (
+                            <div
+                              key={el.id}
+                              style={{
+                                left: `${leftPx}px`,
+                                top: `${topPx}px`,
+                                width: `${(el.barcodeWidthMm || 22) * 2.5 * gridScale}px`,
+                                height: `${(el.barcodeHeightMm || 8) * 2.5 * gridScale}px`,
+                              }}
+                              className="absolute flex items-center justify-center bg-white border border-slate-200"
+                            >
+                              <div className="w-full h-full flex items-center justify-center gap-0.5 px-0.5">
+                                <span className="w-0.5 h-full bg-black"></span>
+                                <span className="w-1 h-full bg-black"></span>
+                                <span className="w-0.5 h-full bg-black"></span>
+                                <span className="w-1 h-full bg-black"></span>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div
+                            key={el.id}
+                            style={{
+                              left: `${leftPx}px`,
+                              top: `${topPx}px`,
+                              fontFamily: el.fontFamily,
+                              fontSize: `${Math.max(5, el.fontSizePt * 0.9 * gridScale)}px`,
+                              color: el.fontColor,
+                              fontWeight: el.isBold ? 'bold' : 'normal',
+                              fontStyle: el.isItalic ? 'italic' : 'normal',
+                            }}
+                            className="absolute leading-none whitespace-nowrap"
+                          >
+                            {getSampleTextForElement(el)}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Page Numbering */}
+                {template.showPageNumber && (
+                  <div className="text-center text-[10px] text-slate-500 pt-3 font-mono">
+                    صفحة 1 من 1
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Bottom Card Geometry Badge */}
           <div className="w-full flex items-center justify-between text-xs text-purple-300 bg-space-darkest/60 px-4 py-2 rounded-xl border border-space-border/40">
@@ -1043,6 +1230,51 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
                   className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-neon-emerald transition-all"
                 >
                   إضافة القالب
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* REACT MODAL 3: Duplicate Template Modal */}
+      {isDuplicateModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-space-dark border border-indigo-500/50 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl p-5 space-y-4 animate-fade-in">
+            <div className="flex items-center gap-2 border-b border-space-border/60 pb-3">
+              <Copy className="w-5 h-5 text-indigo-400" />
+              <h3 className="text-sm font-bold text-white">نسخ القالب الحالي (Duplicate)</h3>
+            </div>
+
+            <form onSubmit={handleConfirmDuplicateTemplate} className="space-y-4">
+              <div>
+                <label className="text-xs text-purple-200 block mb-1 font-semibold">
+                  اسم القالب الجديد المنسوخ:
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  value={duplicateTemplateName}
+                  onChange={(e) => setDuplicateTemplateName(e.target.value)}
+                  placeholder="مثال: نسخة من قالب 51 كرت"
+                  className="w-full bg-space-darkest border border-space-border rounded-xl px-3 py-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-space-border/40">
+                <button
+                  type="button"
+                  onClick={() => setIsDuplicateModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-purple-300 hover:text-white bg-space-card"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg transition-all"
+                >
+                  تأكيد النسخ
                 </button>
               </div>
             </form>

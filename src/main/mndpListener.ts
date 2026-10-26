@@ -8,13 +8,7 @@ export class MndpListener {
   private onDeviceDiscoveredCallbacks: ((devices: MndpDevice[]) => void)[] = [];
   private isListening = false;
 
-  constructor() {
-    this.addFallbackDemoDevices();
-  }
-
-  private addFallbackDemoDevices() {
-    // Add standard local gateway if detected
-  }
+  constructor() {}
 
   public startListening(port = 5678): void {
     if (this.isListening) return;
@@ -201,13 +195,10 @@ export class MndpListener {
     }
 
     if (!ip) ip = senderIp;
-    if (!mac) {
-      mac = 'E4:8D:8C:' + Math.floor(Math.random() * 89 + 10) + ':01:F3';
-    }
 
     return {
       ip,
-      mac,
+      mac: mac || '',
       identity,
       platform,
       version,

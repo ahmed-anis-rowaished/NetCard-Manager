@@ -91,6 +91,10 @@ export function setupIpcHandlers(
     };
   });
 
+  ipcMain.handle('mikrotik:getDashboardData', async () => {
+    return await adapter.getDashboardData();
+  });
+
   ipcMain.handle('mikrotik:getHotspotProfiles', async () => {
     try {
       return await adapter.getHotspotProfiles();
@@ -99,12 +103,32 @@ export function setupIpcHandlers(
     }
   });
 
+  ipcMain.handle('mikrotik:createHotspotProfile', async (_, data) => {
+    await adapter.createHotspotProfile(data);
+    return true;
+  });
+
+  ipcMain.handle('mikrotik:deleteHotspotProfile', async (_, idOrName: string) => {
+    await adapter.deleteHotspotProfile(idOrName);
+    return true;
+  });
+
   ipcMain.handle('mikrotik:getUserManagerProfiles', async () => {
     try {
       return await adapter.getUserManagerProfiles();
     } catch (e: any) {
       return [];
     }
+  });
+
+  ipcMain.handle('mikrotik:createUserManagerProfile', async (_, data) => {
+    await adapter.createUserManagerProfile(data);
+    return true;
+  });
+
+  ipcMain.handle('mikrotik:deleteUserManagerProfile', async (_, idOrName: string) => {
+    await adapter.deleteUserManagerProfile(idOrName);
+    return true;
   });
 
   ipcMain.handle('mikrotik:getUserManagerCustomers', async () => {
@@ -121,6 +145,36 @@ export function setupIpcHandlers(
     } catch {
       return [];
     }
+  });
+
+  ipcMain.handle('mikrotik:createPppProfile', async (_, data) => {
+    await adapter.createPppProfile(data);
+    return true;
+  });
+
+  ipcMain.handle('mikrotik:deletePppProfile', async (_, idOrName: string) => {
+    await adapter.deletePppProfile(idOrName);
+    return true;
+  });
+
+  // --- Profile Metadata Database Handlers ---
+  ipcMain.handle('db:saveProfileMetadata', (_, meta) => {
+    db.saveProfileMetadata(meta);
+    return true;
+  });
+
+  ipcMain.handle('db:getProfileMetadata', (_, mode?: string) => {
+    return db.getProfileMetadata(mode);
+  });
+
+  ipcMain.handle('db:deleteProfileMetadata', (_, mode: string, name: string) => {
+    db.deleteProfileMetadata(mode, name);
+    return true;
+  });
+
+  ipcMain.handle('db:clearDemoData', () => {
+    db.clearDemoData();
+    return true;
   });
 
   // --- Database Saved Devices ---

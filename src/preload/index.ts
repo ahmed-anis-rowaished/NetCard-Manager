@@ -25,10 +25,17 @@ const netcardAPI = {
   connectMikroTik: (config: ConnectionConfig) => ipcRenderer.invoke('mikrotik:connect', config),
   disconnectMikroTik: () => ipcRenderer.invoke('mikrotik:disconnect'),
   getMikroTikStatus: () => ipcRenderer.invoke('mikrotik:getStatus'),
+  getDashboardData: () => ipcRenderer.invoke('mikrotik:getDashboardData'),
   getHotspotProfiles: () => ipcRenderer.invoke('mikrotik:getHotspotProfiles'),
+  createHotspotProfile: (data: any) => ipcRenderer.invoke('mikrotik:createHotspotProfile', data),
+  deleteHotspotProfile: (idOrName: string) => ipcRenderer.invoke('mikrotik:deleteHotspotProfile', idOrName),
   getUserManagerProfiles: () => ipcRenderer.invoke('mikrotik:getUserManagerProfiles'),
+  createUserManagerProfile: (data: any) => ipcRenderer.invoke('mikrotik:createUserManagerProfile', data),
+  deleteUserManagerProfile: (idOrName: string) => ipcRenderer.invoke('mikrotik:deleteUserManagerProfile', idOrName),
   getUserManagerCustomers: () => ipcRenderer.invoke('mikrotik:getUserManagerCustomers'),
   getPppProfiles: () => ipcRenderer.invoke('mikrotik:getPppProfiles'),
+  createPppProfile: (data: any) => ipcRenderer.invoke('mikrotik:createPppProfile', data),
+  deletePppProfile: (idOrName: string) => ipcRenderer.invoke('mikrotik:deletePppProfile', idOrName),
 
   // Database
   getSavedDevices: () => ipcRenderer.invoke('db:getSavedDevices'),
@@ -42,6 +49,12 @@ const netcardAPI = {
   getPosLocations: () => ipcRenderer.invoke('db:getPosLocations'),
   savePosLocation: (pos: POSLocation) => ipcRenderer.invoke('db:savePosLocation', pos),
   deletePosLocation: (id: number) => ipcRenderer.invoke('db:deletePosLocation', id),
+
+  getProfileMetadata: (mode?: string) => ipcRenderer.invoke('db:getProfileMetadata', mode),
+  saveProfileMetadata: (meta: any) => ipcRenderer.invoke('db:saveProfileMetadata', meta),
+  deleteProfileMetadata: (mode: string, name: string) =>
+    ipcRenderer.invoke('db:deleteProfileMetadata', mode, name),
+  clearDemoData: () => ipcRenderer.invoke('db:clearDemoData'),
 
   getCardsArchive: (batchId?: string) => ipcRenderer.invoke('db:getCardsArchive', batchId),
   updateCardPrintedStatus: (ids: number[], isPrinted: boolean) =>

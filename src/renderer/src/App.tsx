@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Navbar } from './components/Navbar';
+import { Navbar, AppView } from './components/Navbar';
 import { LoginView } from './views/LoginView';
+import { DashboardView } from './views/DashboardView';
+import { ProfilesManagerView } from './views/ProfilesManagerView';
 import { TemplateDesignerView } from './views/TemplateDesignerView';
 import { CardGeneratorView } from './views/CardGeneratorView';
 import { CardArchiveView } from './views/CardArchiveView';
@@ -19,7 +21,7 @@ import {
 import { DEFAULT_TEMPLATE } from '../../shared/defaults';
 
 export const App: React.FC = () => {
-  const [currentView, setCurrentView] = useState<'login' | 'generator' | 'templates' | 'archive' | 'pos'>('login');
+  const [currentView, setCurrentView] = useState<AppView>('login');
   const [isConnected, setIsConnected] = useState(false);
   const [routerInfo, setRouterInfo] = useState<RouterOSInfo | null>(null);
 
@@ -57,13 +59,13 @@ export const App: React.FC = () => {
     if (!window.netcardAPI) return;
     try {
       const hp = await window.netcardAPI.getHotspotProfiles();
-      setHotspotProfiles(hp);
+      setHotspotProfiles(hp || []);
 
       const um = await window.netcardAPI.getUserManagerProfiles();
-      setUserManagerProfiles(um);
+      setUserManagerProfiles(um || []);
 
       const ppp = await window.netcardAPI.getPppProfiles();
-      setPppProfiles(ppp);
+      setPppProfiles(ppp || []);
     } catch (e) {
       console.error(e);
     }
@@ -75,7 +77,8 @@ export const App: React.FC = () => {
     if (!config.fastLogin) {
       await loadRouterProfiles();
     }
-    setCurrentView('generator');
+    // Automatically transition to the Dashboard upon successful connection
+    setCurrentView('dashboard');
   };
 
   const handleDisconnect = async () => {
@@ -111,6 +114,14 @@ export const App: React.FC = () => {
           <LoginView onLoginSuccess={handleLoginSuccess} isConnected={isConnected} />
         )}
 
+        {currentView === 'dashboard' && (
+          <DashboardView
+            initialInfo={routerInfo}
+            onDisconnect={handleDisconnect}
+            onNavigateToGenerator={() => setCurrentView('generator')}
+          />
+        )}
+
         {currentView === 'generator' && (
           <CardGeneratorView
             isConnected={isConnected}
@@ -121,8 +132,16 @@ export const App: React.FC = () => {
             pppProfiles={pppProfiles}
             onOpenPosModal={() => setIsPosModalOpen(true)}
             onOpenProfileModal={() => setIsProfileModalOpen(true)}
+            onOpenProfilesManager={() => setCurrentView('profiles')}
             onOpenTemplateDesigner={() => setCurrentView('templates')}
             onOpenFirewallModal={() => setIsFirewallModalOpen(true)}
+          />
+        )}
+
+        {currentView === 'profiles' && (
+          <ProfilesManagerView
+            isConnected={isConnected}
+            onRefreshNeeded={loadRouterProfiles}
           />
         )}
 

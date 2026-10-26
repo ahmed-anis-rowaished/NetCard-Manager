@@ -47,16 +47,71 @@ export interface MndpDevice {
 }
 
 export interface RouterOSInfo {
+  identity?: string;
   version: string;
   majorVersion: 6 | 7;
   platform: string;
   boardName: string;
+  architecture?: string;
   uptime: string;
   cpuLoad: string;
   freeMemory: string;
   totalMemory: string;
   freeHdd: string;
   totalHdd: string;
+  freeMemoryBytes?: number;
+  totalMemoryBytes?: number;
+  freeHddBytes?: number;
+  totalHddBytes?: number;
+}
+
+export interface ActiveSessionItem {
+  id?: string;
+  user: string;
+  address: string;
+  macAddress?: string;
+  uptime: string;
+  service: 'hotspot' | 'usermanager' | 'ppp';
+  bytesIn?: string;
+  bytesOut?: string;
+}
+
+export interface DashboardData {
+  info: RouterOSInfo;
+  counts: {
+    hotspotUsers: number;
+    hotspotActive: number;
+    userManagerUsers: number;
+    userManagerActive: number;
+    pppSecrets: number;
+    pppActive: number;
+  };
+  activeSessions: ActiveSessionItem[];
+}
+
+export interface ProfileMetadata {
+  mode: MikroTikServiceMode;
+  name: string;
+  price: number;
+  currency: string;
+  validity: string;
+  rateLimit?: string;
+  sharedUsers?: number;
+  notes?: string;
+}
+
+export interface CreateProfileParams {
+  mode: MikroTikServiceMode;
+  name: string;
+  rateLimit?: string;
+  sharedUsers?: number;
+  sessionTimeout?: string;
+  validity?: string;
+  transferLimit?: string;
+  localAddress?: string;
+  remoteAddress?: string;
+  price?: number;
+  currency?: string;
 }
 
 export interface HotspotUserProfile {

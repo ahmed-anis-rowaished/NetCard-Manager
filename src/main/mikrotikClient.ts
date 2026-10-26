@@ -97,7 +97,10 @@ export class MikroTikClient {
 
   public async login(user: string, pass: string): Promise<boolean> {
     try {
-      const res = await this.writeSentence(['/login', `=name=${user}`, `=password=${pass}`]);
+      const res = await this.writeSentence(
+        ['/login', `=name=${user}`, `=password=${pass}`],
+        false
+      );
       if (res.length > 0 && res[res.length - 1].type === '!done') {
         const ret = res[res.length - 1].attributes['ret'];
         if (!ret) {
@@ -123,11 +126,10 @@ export class MikroTikClient {
     md5.update(challenge);
     const responseHex = '00' + md5.digest('hex');
 
-    const res2 = await this.writeSentence([
-      '/login',
-      `=name=${user}`,
-      `=response=${responseHex}`,
-    ]);
+    const res2 = await this.writeSentence(
+      ['/login', `=name=${user}`, `=response=${responseHex}`],
+      false
+    );
 
     if (res2.length > 0 && res2[res2.length - 1].type === '!done') {
       return true;
@@ -136,9 +138,9 @@ export class MikroTikClient {
   }
 
   /**
-   * Writes a single sentence with unique .tag support.
+   * Writes a single sentence with optional unique .tag support.
    */
-  public writeSentence(words: string[]): Promise<SentenceResult[]> {
+  public writeSentence(words: string[], allowTag = true): Promise<SentenceResult[]> {
     return new Promise((resolve, reject) => {
       if (!this.socket || !this.connected) {
         return reject(new Error('غير متصل بجهاز المايكروتك'));
@@ -147,10 +149,12 @@ export class MikroTikClient {
       const tag = `nc_${++this.tagCounter}`;
       const finalWords = [...words];
 
-      // Attach .tag if not already provided
-      const hasTag = words.some((w) => w.startsWith('.tag=') || w.startsWith('=.tag='));
-      if (!hasTag) {
-        finalWords.push(`.tag=${tag}`);
+      // Attach .tag if requested and not already provided
+      if (allowTag) {
+        const hasTag = words.some((w) => w.startsWith('.tag=') || w.startsWith('=.tag='));
+        if (!hasTag) {
+          finalWords.push(`.tag=${tag}`);
+        }
       }
 
       const timeoutTimer = setTimeout(() => {

@@ -9,6 +9,7 @@ import {
   POSLocation,
   GeneratedCard,
   TemplateElementConfig,
+  ProfileMetadata,
 } from '../shared/types';
 import { DEFAULT_TEMPLATE, DEFAULT_ELEMENTS } from '../shared/defaults';
 
@@ -75,6 +76,7 @@ export class AppDatabase {
       this.saveToFile();
     }
     this.createTables(); // Ensure all tables exist
+    this.clearDemoData(); // Purge any legacy demo/mock data
   }
 
   private saveToFile(): void {
@@ -170,6 +172,18 @@ export class AppDatabase {
         routerIp TEXT
       );
 
+      CREATE TABLE IF NOT EXISTS profile_metadata (
+        mode TEXT NOT NULL,
+        name TEXT NOT NULL,
+        price REAL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT 'ريال',
+        validity TEXT,
+        rateLimit TEXT,
+        sharedUsers INTEGER DEFAULT 1,
+        notes TEXT,
+        PRIMARY KEY (mode, name)
+      );
+
       CREATE TABLE IF NOT EXISTS app_settings (
         key TEXT PRIMARY KEY,
         value TEXT
@@ -203,31 +217,21 @@ export class AppDatabase {
         return el;
       }),
     });
+  }
 
-    // Seed default POS location
-    this.savePosLocation({
-      name: 'نقطة بيع المركز الرئيسي',
-      ownerName: 'الإدارة العامة',
-      phone: '777123456',
-      address: 'الشارع العام - بجانب البريد',
-      commissionRate: 5,
-      notes: 'المركز الرئيسي للشبكة',
-    });
-
-    // Seed default device
-    this.saveDevice({
-      name: 'الراوتر الرئيسي (Default)',
-      ip: '192.168.88.1',
-      domain: '',
-      connectionType: 'ip',
-      username: 'admin',
-      passwordEncrypted: '',
-      port: 8728,
-      useSsl: false,
-      comment: 'راوتر شبكة المايكروتك الرئيسية',
-      fastLogin: false,
-      turboMode: true,
-    });
+  public clearDemoData(): void {
+    if (!this.db) return;
+    try {
+      this.db.run(
+        `DELETE FROM saved_devices WHERE name LIKE '%الراوتر الرئيسي (Default)%' OR (ip = '192.168.88.1' AND comment LIKE '%شبكة المايكروتك الرئيسية%')`
+      );
+      this.db.run(
+        `DELETE FROM pos_locations WHERE name = 'نقطة بيع المركز الرئيسي' AND phone = '777123456'`
+      );
+      this.saveToFile();
+    } catch (e) {
+      console.warn('[Database] clearDemoData error:', e);
+    }
   }
 
   // --- Saved Devices ---
@@ -547,6 +551,52 @@ export class AppDatabase {
       isPrinted ? 1 : 0,
       ...ids,
     ]);
+    this.saveToFile();
+  }
+
+  // --- Profile Metadata ---
+  public saveProfileMetadata(meta: ProfileMetadata): void {
+    if (!this.db) return;
+    this.db.run(
+      `INSERT OR REPLACE INTO profile_metadata (mode, name, price, currency, validity, rateLimit, sharedUsers, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        meta.mode,
+        meta.name,
+        meta.price || 0,
+        meta.currency || 'ريال',
+        meta.validity || '',
+        meta.rateLimit || '',
+        meta.sharedUsers || 1,
+        meta.notes || '',
+      ]
+    );
+    this.saveToFile();
+  }
+
+  public getProfileMetadata(mode?: string): ProfileMetadata[] {
+    if (!this.db) return [];
+    let sql = 'SELECT * FROM profile_metadata';
+    const params: any[] = [];
+    if (mode) {
+      sql += ' WHERE mode = ?';
+      params.push(mode);
+    }
+    const res = this.db.exec(sql, params);
+    if (!res.length || !res[0].values) return [];
+    const cols = res[0].columns;
+    return res[0].values.map((row: any[]) => {
+      const obj: any = {};
+      cols.forEach((col, idx) => {
+        obj[col] = row[idx];
+      });
+      return obj as ProfileMetadata;
+    });
+  }
+
+  public deleteProfileMetadata(mode: string, name: string): void {
+    if (!this.db) return;
+    this.db.run('DELETE FROM profile_metadata WHERE mode = ? AND name = ?', [mode, name]);
     this.saveToFile();
   }
 }
