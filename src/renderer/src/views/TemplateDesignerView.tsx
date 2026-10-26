@@ -19,6 +19,7 @@ import {
   Sparkles,
   Link as LinkIcon,
   Unlink,
+  X,
 } from 'lucide-react';
 import {
   CardTemplate,
@@ -48,6 +49,13 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(
     null
   );
+
+  // New Template Modal State (Replacing window.prompt)
+  const [isNewTemplateModalOpen, setIsNewTemplateModalOpen] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState('');
+
+  // Delete Confirm Modal State
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -82,14 +90,19 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
     }
   };
 
-  const handleAddTemplate = async () => {
-    const name = prompt('أدخل اسم القالب الجديد (مثال: 1000RY - VIP):', 'قالب جديد');
-    if (!name) return;
+  const handleOpenNewTemplateModal = () => {
+    setNewTemplateName(`قالب جديد - ${templates.length + 1}`);
+    setIsNewTemplateModalOpen(true);
+  };
+
+  const handleConfirmCreateTemplate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTemplateName.trim()) return;
 
     const newTmpl: CardTemplate = {
       ...JSON.parse(JSON.stringify(DEFAULT_TEMPLATE)),
       id: undefined,
-      name,
+      name: newTemplateName.trim(),
     };
 
     if (window.netcardAPI) {
@@ -98,6 +111,7 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
       await loadTemplates();
       setSelectedTemplateId(newId);
       setTemplate(newTmpl);
+      setIsNewTemplateModalOpen(false);
       showFeedback('تم إنشاء القالب الجديد بنجاح', 'success');
     }
   };
@@ -110,21 +124,22 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
       await loadTemplates();
       showFeedback('تم حفظ تعديلات القالب بنجاح في قاعدة البيانات', 'success');
     } catch (err: any) {
-      showFeedback(err.message, 'error');
+      showFeedback(err.message || 'فشل حفظ القالب', 'error');
     }
   };
 
-  const handleDeleteTemplate = async () => {
+  const handleConfirmDelete = async () => {
     if (!template.id || !window.netcardAPI) return;
     if (templates.length <= 1) {
-      alert('لا يمكن حذف القالب الوحيد المتبقي!');
+      showFeedback('لا يمكن حذف القالب الوحيد المتبقي في النظام', 'error');
+      setIsDeleteModalOpen(false);
       return;
     }
-    if (confirm(`هل أنت متأكد من حذف القالب "${template.name}"؟`)) {
-      await window.netcardAPI.deleteTemplate(template.id);
-      await loadTemplates();
-      showFeedback('تم حذف القالب', 'success');
-    }
+
+    await window.netcardAPI.deleteTemplate(template.id);
+    await loadTemplates();
+    setIsDeleteModalOpen(false);
+    showFeedback('تم حذف القالب بنجاح', 'success');
   };
 
   const showFeedback = (text: string, type: 'success' | 'error') => {
@@ -300,7 +315,7 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
           )}
 
           <button
-            onClick={handleAddTemplate}
+            onClick={handleOpenNewTemplateModal}
             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-neon-emerald"
           >
             <Plus className="w-4 h-4" />
@@ -316,7 +331,7 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
           </button>
 
           <button
-            onClick={handleDeleteTemplate}
+            onClick={() => setIsDeleteModalOpen(true)}
             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-red-600/80 hover:bg-red-500 text-white text-xs font-bold transition-all"
           >
             <Trash2 className="w-4 h-4" />
@@ -325,7 +340,7 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
 
           <button
             onClick={() => {
-              showFeedback('جاري تجهيز معاينة شبكة الطباعة...', 'success');
+              showFeedback('شبكة الطباعة مطابقة لمعاينة مساحة العمل تماماً', 'success');
             }}
             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-neon-purple"
           >
@@ -335,7 +350,7 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
         </div>
       </div>
 
-      {/* MAIN BODY: 3-column / 2-column flex workspace */}
+      {/* MAIN BODY: 2-column flex workspace */}
       <div className="flex-1 flex gap-3 overflow-hidden">
         {/* LEFT COLUMN: Template Settings, 11 Elements Toggles, Fonts & Dimensions */}
         <div className="w-[420px] flex flex-col gap-3 overflow-y-auto pr-1 shrink-0">
@@ -603,7 +618,9 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
                   type="number"
                   value={selectedElement.fontSizePt}
                   onChange={(e) =>
-                    updateElement(selectedElement.id, { fontSizePt: parseInt(e.target.value, 10) || 8 })
+                    updateElement(selectedElement.id, {
+                      fontSizePt: parseInt(e.target.value, 10) || 8,
+                    })
                   }
                   className="w-full bg-space-darkest border border-space-border text-xs rounded px-1.5 py-1 text-white text-center font-mono font-bold"
                 />
@@ -615,13 +632,64 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
                   <input
                     type="color"
                     value={selectedElement.fontColor}
-                    onChange={(e) => updateElement(selectedElement.id, { fontColor: e.target.value })}
+                    onChange={(e) =>
+                      updateElement(selectedElement.id, { fontColor: e.target.value })
+                    }
                     className="w-5 h-5 bg-transparent border-none cursor-pointer rounded"
                   />
-                  <span className="text-[10px] font-mono text-purple-300">{selectedElement.fontColor}</span>
+                  <span className="text-[10px] font-mono text-purple-300">
+                    {selectedElement.fontColor}
+                  </span>
                 </div>
               </div>
             </div>
+
+            {/* Barcode Type Switcher (If element is barcode) */}
+            {selectedElement.id === 'barcode' && (
+              <div className="grid grid-cols-2 gap-2 pt-1 border-t border-space-border/30">
+                <div className="space-y-1">
+                  <span className="text-[10px] text-purple-300">نوع الباركود:</span>
+                  <select
+                    value={selectedElement.barcodeType || 'qr'}
+                    onChange={(e) =>
+                      updateElement(selectedElement.id, {
+                        barcodeType: e.target.value as 'qr' | 'code128',
+                      })
+                    }
+                    className="w-full bg-space-darkest border border-space-border text-xs rounded px-1.5 py-1 text-space-cyan font-bold"
+                  >
+                    <option value="qr">باركود ثنائي QR Code</option>
+                    <option value="code128">باركود خطي 1D (Code128)</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-[10px] text-purple-300">الأبعاد (عرض × ارتفاع مم):</span>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      value={selectedElement.barcodeWidthMm || 12}
+                      onChange={(e) =>
+                        updateElement(selectedElement.id, {
+                          barcodeWidthMm: parseFloat(e.target.value) || 12,
+                        })
+                      }
+                      className="w-1/2 bg-space-darkest border border-space-border text-xs rounded px-1 py-1 text-center font-mono"
+                    />
+                    <span className="text-purple-400 text-xs">×</span>
+                    <input
+                      type="number"
+                      value={selectedElement.barcodeHeightMm || 12}
+                      onChange={(e) =>
+                        updateElement(selectedElement.id, {
+                          barcodeHeightMm: parseFloat(e.target.value) || 12,
+                        })
+                      }
+                      className="w-1/2 bg-space-darkest border border-space-border text-xs rounded px-1 py-1 text-center font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Bold / Italic Toggles */}
             <div className="flex items-center gap-4">
@@ -639,7 +707,9 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
                 <input
                   type="checkbox"
                   checked={selectedElement.isItalic}
-                  onChange={(e) => updateElement(selectedElement.id, { isItalic: e.target.checked })}
+                  onChange={(e) =>
+                    updateElement(selectedElement.id, { isItalic: e.target.checked })
+                  }
                   className="rounded border-space-border bg-space-darkest text-space-accent focus:ring-0"
                 />
                 <span className="italic">خط مائل (Italic)</span>
@@ -647,14 +717,22 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
             </div>
 
             {/* Custom text for detail elements or price */}
-            {['custom1', 'custom2', 'price', 'dataLimit', 'validity'].includes(selectedElement.id) && (
+            {['custom1', 'custom2', 'price', 'dataLimit', 'validity'].includes(
+              selectedElement.id
+            ) && (
               <div className="space-y-1 pt-1">
-                <span className="text-[10px] text-purple-300">النص المخصص أو القيمة الافتراضية:</span>
+                <span className="text-[10px] text-purple-300">
+                  النص المخصص أو القيمة الافتراضية:
+                </span>
                 <input
                   type="text"
                   value={selectedElement.customText || ''}
-                  onChange={(e) => updateElement(selectedElement.id, { customText: e.target.value })}
-                  placeholder={selectedElement.id === 'custom1' ? 'للتواصل: 777777777' : 'قيمة مخصصة'}
+                  onChange={(e) =>
+                    updateElement(selectedElement.id, { customText: e.target.value })
+                  }
+                  placeholder={
+                    selectedElement.id === 'custom1' ? 'للتواصل: 777777777' : 'قيمة مخصصة'
+                  }
                   className="w-full bg-space-darkest border border-space-border rounded px-2 py-1 text-xs text-white focus:outline-none"
                 />
               </div>
@@ -765,7 +843,9 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
                 onChange={(e) => setPreviewZoom(parseFloat(e.target.value))}
                 className="w-24 accent-space-accent cursor-pointer"
               />
-              <span className="text-xs font-mono text-space-cyan">{Math.round(previewZoom * 25)}%</span>
+              <span className="text-xs font-mono text-space-cyan">
+                {Math.round(previewZoom * 25)}%
+              </span>
             </div>
           </div>
 
@@ -813,6 +893,7 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
                 const topPx = el.yMm * previewZoom;
 
                 if (el.id === 'barcode') {
+                  const is1D = el.barcodeType === 'code128';
                   return (
                     <div
                       key={el.id}
@@ -820,21 +901,35 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
                       style={{
                         left: `${leftPx}px`,
                         top: `${topPx}px`,
-                        width: `${(el.barcodeWidthMm || 12) * previewZoom}px`,
-                        height: `${(el.barcodeHeightMm || 12) * previewZoom}px`,
+                        width: `${(el.barcodeWidthMm || (is1D ? 28 : 12)) * previewZoom}px`,
+                        height: `${(el.barcodeHeightMm || (is1D ? 10 : 12)) * previewZoom}px`,
                       }}
-                      className={`absolute cursor-move flex items-center justify-center bg-slate-100 rounded border ${
+                      className={`absolute cursor-move flex items-center justify-center bg-slate-50 rounded border ${
                         isSelected
                           ? 'border-purple-600 ring-2 ring-purple-400 shadow-lg'
                           : 'border-slate-300'
                       }`}
                     >
-                      {/* Fake QR preview */}
-                      <div className="w-full h-full p-1 flex flex-col justify-between items-center">
-                        <div className="w-full h-full bg-slate-800 rounded-sm opacity-90 flex items-center justify-center text-[8px] text-white font-mono">
-                          QR
+                      {is1D ? (
+                        <div className="w-full h-full p-1 flex flex-col justify-between items-center bg-white">
+                          <div className="w-full h-4/5 flex justify-center items-center gap-0.5 px-1">
+                            <span className="w-1 h-full bg-black"></span>
+                            <span className="w-0.5 h-full bg-black"></span>
+                            <span className="w-1.5 h-full bg-black"></span>
+                            <span className="w-0.5 h-full bg-black"></span>
+                            <span className="w-1 h-full bg-black"></span>
+                            <span className="w-2 h-full bg-black"></span>
+                            <span className="w-0.5 h-full bg-black"></span>
+                          </div>
+                          <span className="text-[7px] font-mono text-black">84729103</span>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="w-full h-full p-1 flex flex-col justify-between items-center bg-white">
+                          <div className="w-full h-full bg-slate-900 rounded-sm flex items-center justify-center text-[8px] text-white font-mono">
+                            QR
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 }
@@ -868,11 +963,12 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
           {/* Bottom Card Geometry Badge */}
           <div className="w-full flex items-center justify-between text-xs text-purple-300 bg-space-darkest/60 px-4 py-2 rounded-xl border border-space-border/40">
             <span>
-              أبعاد الكرت الحقيقي: <strong className="text-white">{template.cardWidthMm} مم</strong> ×{' '}
-              <strong className="text-white">{template.cardHeightMm} مم</strong>
+              أبعاد الكرت الحقيقي: <strong className="text-white">{template.cardWidthMm} مم</strong>{' '}
+              × <strong className="text-white">{template.cardHeightMm} مم</strong>
             </span>
             <span>
-              توزيع الصفحة: <strong className="text-space-cyan">{template.columnsCount} أعمدة</strong> ×{' '}
+              توزيع الصفحة:{' '}
+              <strong className="text-space-cyan">{template.columnsCount} أعمدة</strong> ×{' '}
               <strong className="text-space-cyan">
                 {Math.ceil(template.cardsPerPage / template.columnsCount)} صفوف
               </strong>{' '}
@@ -882,6 +978,94 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* REACT MODAL 1: Create New Template Modal (Replacing window.prompt) */}
+      {isNewTemplateModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-space-dark border border-space-border rounded-2xl w-full max-w-md overflow-hidden shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-space-border/60 pb-3">
+              <div className="flex items-center gap-2">
+                <Plus className="w-5 h-5 text-space-accent" />
+                <h3 className="text-sm font-bold text-white">إضافة قالب كروت جديد</h3>
+              </div>
+              <button
+                onClick={() => setIsNewTemplateModalOpen(false)}
+                className="text-purple-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmCreateTemplate} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-purple-200 block mb-1.5">
+                  اسم القالب الجديد (مثال: 500RY - VIP):
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  value={newTemplateName}
+                  onChange={(e) => setNewTemplateName(e.target.value)}
+                  placeholder="500RY - VIP"
+                  className="w-full bg-space-darkest border border-space-border focus:border-space-accent rounded-xl px-3 py-2 text-sm text-white focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-space-border/40">
+                <button
+                  type="button"
+                  onClick={() => setIsNewTemplateModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-purple-300 hover:text-white bg-space-card"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-neon-emerald transition-all"
+                >
+                  إضافة القالب
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* REACT MODAL 2: Delete Confirm Modal */}
+      {isDeleteModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-space-dark border border-red-500/50 rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl p-5 space-y-4">
+            <div className="flex items-center gap-2 border-b border-space-border/60 pb-3">
+              <Trash2 className="w-5 h-5 text-red-400" />
+              <h3 className="text-sm font-bold text-white">تأكيد حذف القالب</h3>
+            </div>
+
+            <p className="text-xs text-purple-200 leading-relaxed">
+              هل أنت متأكد من رغبتك في حذف القالب{' '}
+              <strong className="text-white">"{template.name}"</strong>؟ لا يمكن التراجع عن هذه
+              الخطوة.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-space-border/40">
+              <button
+                type="button"
+                onClick={() => setIsDeleteModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-purple-300 hover:text-white bg-space-card"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-500 text-white transition-all"
+              >
+                تأكيد الحذف
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

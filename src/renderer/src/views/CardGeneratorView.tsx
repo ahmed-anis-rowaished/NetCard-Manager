@@ -79,6 +79,7 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
   // Selected Profile
   const [selectedProfile, setSelectedProfile] = useState<string>('');
   const [umCustomer, setUmCustomer] = useState<string>('admin');
+  const [customersList, setCustomersList] = useState<string[]>(['admin']);
   const [selectedPosId, setSelectedPosId] = useState<number | undefined>(undefined);
 
   // Generation Pattern inputs
@@ -105,8 +106,18 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
   useEffect(() => {
     if (mode === 'hotspot' && hotspotProfiles.length > 0) {
       setSelectedProfile(hotspotProfiles[0].name);
-    } else if (mode === 'usermanager' && userManagerProfiles.length > 0) {
-      setSelectedProfile(userManagerProfiles[0].name);
+    } else if (mode === 'usermanager') {
+      if (userManagerProfiles.length > 0) {
+        setSelectedProfile(userManagerProfiles[0].name);
+      }
+      if (window.netcardAPI) {
+        window.netcardAPI.getUserManagerCustomers().then((custs) => {
+          if (custs && custs.length > 0) {
+            setCustomersList(custs);
+            setUmCustomer(custs[0]);
+          }
+        });
+      }
     } else if (mode === 'broadband' && pppProfiles.length > 0) {
       setSelectedProfile(pppProfiles[0].name);
     }
@@ -395,6 +406,26 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
 
           {/* Profile, Template & POS with (+) Buttons */}
           <div className="space-y-2 pt-1 border-t border-space-border/30">
+            {/* Customer Dropdown for User Manager */}
+            {mode === 'usermanager' && (
+              <div>
+                <span className="text-[11px] text-purple-200 font-semibold block mb-1">
+                  عميل يوزمنجر (Customer / Router):
+                </span>
+                <select
+                  value={umCustomer}
+                  onChange={(e) => setUmCustomer(e.target.value)}
+                  className="w-full bg-space-darkest border border-space-border text-xs rounded-lg py-1.5 px-2.5 text-white"
+                >
+                  {customersList.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {/* Profile Dropdown */}
             <div>
               <div className="flex items-center justify-between mb-1">

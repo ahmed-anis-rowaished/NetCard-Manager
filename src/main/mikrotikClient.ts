@@ -8,22 +8,30 @@ export interface SentenceResult {
   raw: string[];
 }
 
+interface PendingCommand {
+  tag: string;
+  resolve: (res: SentenceResult[]) => void;
+  reject: (err: Error) => void;
+  accumulator: SentenceResult[];
+  timeoutTimer: NodeJS.Timeout;
+}
+
 export class MikroTikClient {
   private socket: net.Socket | tls.TLSSocket | null = null;
   private buffer: Buffer = Buffer.alloc(0);
   private connected = false;
-  private pendingQueue: {
-    resolve: (res: SentenceResult[]) => void;
-    reject: (err: Error) => void;
-    accumulator: SentenceResult[];
-    tag?: string;
-  }[] = [];
+  private tagCounter = 0;
+
+  // Tag-based command mapping for concurrent pipelined requests
+  private pendingMap: Map<string, PendingCommand> = new Map();
+  // Fallback queue for commands without tags (e.g. initial login)
+  private fallbackQueue: PendingCommand[] = [];
 
   constructor(
     private host: string,
     private port: number = 8728,
     private useSsl: boolean = false,
-    private timeoutMs: number = 10000
+    private timeoutMs: number = 15000
   ) {}
 
   public isSocketConnected(): boolean {
@@ -88,16 +96,13 @@ export class MikroTikClient {
   }
 
   public async login(user: string, pass: string): Promise<boolean> {
-    // 1. Try modern login method (RouterOS v6.43+ & v7)
     try {
       const res = await this.writeSentence(['/login', `=name=${user}`, `=password=${pass}`]);
       if (res.length > 0 && res[res.length - 1].type === '!done') {
-        // If modern login returned !done with no challenge, we are logged in!
         const ret = res[res.length - 1].attributes['ret'];
         if (!ret) {
           return true;
         }
-        // If it returned ret, this is legacy challenge-response
         return await this.legacyLogin(user, pass, ret);
       }
     } catch (e: any) {
@@ -130,20 +135,50 @@ export class MikroTikClient {
     throw new Error('فشل تسجيل الدخول القديم (Legacy Login)');
   }
 
+  /**
+   * Writes a single sentence with unique .tag support.
+   */
   public writeSentence(words: string[]): Promise<SentenceResult[]> {
     return new Promise((resolve, reject) => {
       if (!this.socket || !this.connected) {
         return reject(new Error('غير متصل بجهاز المايكروتك'));
       }
 
-      this.pendingQueue.push({
-        resolve,
-        reject,
+      const tag = `nc_${++this.tagCounter}`;
+      const finalWords = [...words];
+
+      // Attach .tag if not already provided
+      const hasTag = words.some((w) => w.startsWith('.tag=') || w.startsWith('=.tag='));
+      if (!hasTag) {
+        finalWords.push(`.tag=${tag}`);
+      }
+
+      const timeoutTimer = setTimeout(() => {
+        if (this.pendingMap.has(tag)) {
+          this.pendingMap.delete(tag);
+          reject(new Error(`انتهت مهلة تنفيذ الأمر على الراوتر (${finalWords[0]})`));
+        }
+      }, this.timeoutMs);
+
+      const pendingCmd: PendingCommand = {
+        tag,
+        resolve: (results) => {
+          clearTimeout(timeoutTimer);
+          resolve(results);
+        },
+        reject: (err) => {
+          clearTimeout(timeoutTimer);
+          reject(err);
+        },
         accumulator: [],
-      });
+        timeoutTimer,
+      };
+
+      this.pendingMap.set(tag, pendingCmd);
+      this.fallbackQueue.push(pendingCmd);
 
       const bufferChunks: Buffer[] = [];
-      for (const word of words) {
+      for (const word of finalWords) {
         const wordBuf = Buffer.from(word, 'utf8');
         bufferChunks.push(this.encodeLength(wordBuf.length));
         bufferChunks.push(wordBuf);
@@ -156,15 +191,48 @@ export class MikroTikClient {
   }
 
   /**
-   * Turbo Batch Mode: Writes multiple sentences without waiting for each one,
-   * then awaits all responses simultaneously.
+   * Turbo Batch Mode with Controlled Concurrency (Sliding Window):
+   * Dispatches sentences using a window of concurrency (e.g. 8-10 parallel commands)
+   * while tagging each sentence with unique .tag, avoiding socket drop and cross-talk.
    */
-  public async writeBatchSentences(sentences: string[][]): Promise<SentenceResult[][]> {
-    const promises: Promise<SentenceResult[]>[] = [];
-    for (const s of sentences) {
-      promises.push(this.writeSentence(s));
+  public async writeBatchSentences(
+    sentences: string[][],
+    concurrency = 8
+  ): Promise<SentenceResult[][]> {
+    if (sentences.length === 0) return [];
+
+    const results: SentenceResult[][] = new Array(sentences.length);
+    let currentIndex = 0;
+
+    const worker = async () => {
+      while (true) {
+        const idx = currentIndex++;
+        if (idx >= sentences.length) break;
+
+        try {
+          results[idx] = await this.writeSentence(sentences[idx]);
+        } catch (err: any) {
+          // Wrap error as trap result so batch completes without discarding other promises
+          results[idx] = [
+            {
+              type: '!trap',
+              attributes: { message: err.message || 'Error executing batch command' },
+              raw: ['!trap', `=message=${err.message}`],
+            },
+          ];
+        }
+      }
+    };
+
+    const workerPool: Promise<void>[] = [];
+    const actualConcurrency = Math.max(1, Math.min(concurrency, sentences.length));
+
+    for (let i = 0; i < actualConcurrency; i++) {
+      workerPool.push(worker());
     }
-    return Promise.all(promises);
+
+    await Promise.all(workerPool);
+    return results;
   }
 
   private handleData(chunk: Buffer): void {
@@ -178,26 +246,48 @@ export class MikroTikClient {
       if (!sentenceWords) break;
 
       const sentence = this.processSentence(sentenceWords);
-      const currentTask = this.pendingQueue[0];
-      if (!currentTask) continue;
+      const tag = sentence.attributes['.tag'] || sentence.attributes['tag'];
+
+      let targetCmd: PendingCommand | undefined;
+
+      if (tag && this.pendingMap.has(tag)) {
+        targetCmd = this.pendingMap.get(tag);
+      } else if (this.fallbackQueue.length > 0) {
+        targetCmd = this.fallbackQueue[0];
+      }
+
+      if (!targetCmd) {
+        continue;
+      }
 
       if (sentence.type === '!re') {
-        currentTask.accumulator.push(sentence);
+        targetCmd.accumulator.push(sentence);
       } else if (sentence.type === '!done') {
-        currentTask.accumulator.push(sentence);
-        this.pendingQueue.shift();
-        currentTask.resolve(currentTask.accumulator);
+        targetCmd.accumulator.push(sentence);
+        this.cleanUpCommand(targetCmd);
+        targetCmd.resolve(targetCmd.accumulator);
       } else if (sentence.type === '!trap') {
-        currentTask.accumulator.push(sentence);
-        this.pendingQueue.shift();
+        targetCmd.accumulator.push(sentence);
+        this.cleanUpCommand(targetCmd);
         const msg = sentence.attributes['message'] || 'خطأ في تنفيذ الأمر على المايكروتك';
-        currentTask.reject(new Error(msg));
+        targetCmd.reject(new Error(msg));
       } else if (sentence.type === '!fatal') {
-        this.pendingQueue.shift();
+        this.cleanUpCommand(targetCmd);
         const msg = sentence.attributes['message'] || 'انقطع الاتصال بالراوتر فجأة';
-        currentTask.reject(new Error(msg));
+        targetCmd.reject(new Error(msg));
         this.close();
       }
+    }
+  }
+
+  private cleanUpCommand(cmd: PendingCommand): void {
+    if (cmd.timeoutTimer) clearTimeout(cmd.timeoutTimer);
+    if (this.pendingMap.has(cmd.tag)) {
+      this.pendingMap.delete(cmd.tag);
+    }
+    const idx = this.fallbackQueue.indexOf(cmd);
+    if (idx !== -1) {
+      this.fallbackQueue.splice(idx, 1);
     }
   }
 
@@ -207,19 +297,18 @@ export class MikroTikClient {
 
     while (offset < this.buffer.length) {
       const lengthInfo = this.decodeLength(this.buffer, offset);
-      if (!lengthInfo) return null; // Incomplete data in buffer
+      if (!lengthInfo) return null;
 
       offset += lengthInfo.lengthBytes;
       const wordLen = lengthInfo.value;
 
       if (wordLen === 0) {
-        // End of sentence!
         this.buffer = this.buffer.subarray(offset);
         return words;
       }
 
       if (offset + wordLen > this.buffer.length) {
-        return null; // Not enough bytes for full word
+        return null;
       }
 
       const word = this.buffer.toString('utf8', offset, offset + wordLen);
@@ -310,10 +399,12 @@ export class MikroTikClient {
   }
 
   private rejectAllPending(err: Error): void {
-    while (this.pendingQueue.length > 0) {
-      const item = this.pendingQueue.shift();
-      item?.reject(err);
+    for (const cmd of this.pendingMap.values()) {
+      if (cmd.timeoutTimer) clearTimeout(cmd.timeoutTimer);
+      cmd.reject(err);
     }
+    this.pendingMap.clear();
+    this.fallbackQueue = [];
   }
 
   public close(): void {

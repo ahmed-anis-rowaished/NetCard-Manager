@@ -100,6 +100,22 @@ export class MikroTikAdapter {
     let failed = 0;
     const errors: string[] = [];
 
+    // If bindMacOnFirstUse is active, configure the profile's on-login script to automatically bind MAC
+    if (options.bindMacOnFirstUse && cards.length > 0) {
+      const targetProfile = cards[0].profile || 'default';
+      try {
+        const onLoginScript =
+          '{ :local mac $"mac-address"; /ip hotspot user set [find name=$user] mac-address=$mac }';
+        await this.client.writeSentence([
+          '/ip/hotspot/user/profile/set',
+          `=numbers=${targetProfile}`,
+          `=on-login=${onLoginScript}`,
+        ]);
+      } catch (err: any) {
+        console.warn('[Hotspot Profile on-login] Note:', err.message);
+      }
+    }
+
     const sentences: string[][] = cards.map((card) => {
       const s = ['/ip/hotspot/user/add', `=name=${card.username}`];
 
@@ -113,7 +129,6 @@ export class MikroTikAdapter {
         s.push(`=limit-uptime=${card.validity}`);
       }
       if (card.dataLimit) {
-        // e.g. "1000M" or "1G"
         s.push(`=limit-bytes-total=${this.parseDataLimitToBytes(card.dataLimit)}`);
       }
       if ((card as any).mac) {
@@ -125,31 +140,22 @@ export class MikroTikAdapter {
     });
 
     if (options.turboMode) {
-      // Turbo Mode: Pipeline batch in chunks of 50
-      const chunkSize = 50;
-      for (let i = 0; i < sentences.length; i += chunkSize) {
-        const slice = sentences.slice(i, i + chunkSize);
-        try {
-          await this.client.writeBatchSentences(slice);
-          added += slice.length;
-        } catch (err: any) {
-          // If batch fails, fallback to sequential for this slice
-          for (const s of slice) {
-            try {
-              await this.client.writeSentence(s);
-              added++;
-            } catch (e: any) {
-              failed++;
-              errors.push(e.message);
-            }
-          }
-        }
-        if (options.onProgress) {
-          options.onProgress(Math.min(i + chunkSize, sentences.length), sentences.length);
+      const concurrency = 8;
+      const results = await this.client.writeBatchSentences(sentences, concurrency);
+      for (const res of results) {
+        const isTrap = res.some((r) => r.type === '!trap');
+        if (isTrap) {
+          failed++;
+          const trapMsg = res.find((r) => r.type === '!trap')?.attributes['message'] || 'فشل إضافة الكرت';
+          errors.push(trapMsg);
+        } else {
+          added++;
         }
       }
+      if (options.onProgress) {
+        options.onProgress(sentences.length, sentences.length);
+      }
     } else {
-      // Sequential Mode
       for (let i = 0; i < sentences.length; i++) {
         try {
           await this.client.writeSentence(sentences[i]);
@@ -186,7 +192,6 @@ export class MikroTikAdapter {
           validity: r.attributes['validity'] || '',
         }));
     } catch (e) {
-      // Fallback empty if package not installed
       return [
         { id: '1', name: 'default', price: 0, validity: '30d' },
         { id: '2', name: '1GB_3Days', price: 200, validity: '3d' },
@@ -216,6 +221,8 @@ export class MikroTikAdapter {
     cards: GeneratedCard[],
     options: {
       customer?: string;
+      profile?: string;
+      bindFirstMac?: boolean;
       turboMode?: boolean;
       onProgress?: (current: number, total: number) => void;
     } = {}
@@ -227,49 +234,87 @@ export class MikroTikAdapter {
     let failed = 0;
     const errors: string[] = [];
 
-    const sentences: string[][] = cards.map((card) => {
+    // In both v6 and v7, we prepare commands.
+    // In v7: Command 1: /user-manager/user/add, Command 2: /user-manager/user-profile/add
+    // In v6: Command 1: /tool/user-manager/user/add, Command 2: /tool/user-manager/user/create-and-activate-profile
+    const allCommands: string[][] = [];
+
+    for (const card of cards) {
+      const profileToBind = options.profile || card.profile;
+
       if (isV7) {
-        // ROS v7 UserManager
-        const s = ['/user-manager/user/add', `=name=${card.username}`];
-        if (card.password) s.push(`=password=${card.password}`);
-        s.push(`=comment=NetCard_${card.batchId}`);
-        return s;
+        const userCmd = ['/user-manager/user/add', `=name=${card.username}`];
+        if (card.password) userCmd.push(`=password=${card.password}`);
+        if (card.sharedUsers) userCmd.push(`=shared-users=${card.sharedUsers}`);
+        if (options.bindFirstMac) userCmd.push(`=caller-id=bind`);
+        userCmd.push(`=comment=NetCard_${card.batchId}`);
+        allCommands.push(userCmd);
+
+        if (profileToBind && profileToBind !== 'none') {
+          const profileCmd = [
+            '/user-manager/user-profile/add',
+            `=user=${card.username}`,
+            `=profile=${profileToBind}`,
+            `=comment=NetCard_${card.batchId}`,
+          ];
+          allCommands.push(profileCmd);
+        }
       } else {
-        // ROS v6 Tool UserManager
-        const s = [
+        const userCmd = [
           '/tool/user-manager/user/add',
           `=username=${card.username}`,
           `=customer=${options.customer || 'admin'}`,
         ];
-        if (card.password) s.push(`=password=${card.password}`);
-        if (card.sharedUsers) s.push(`=shared-users=${card.sharedUsers}`);
-        s.push(`=comment=NetCard_${card.batchId}`);
-        return s;
-      }
-    });
+        if (card.password) userCmd.push(`=password=${card.password}`);
+        if (card.sharedUsers) userCmd.push(`=shared-users=${card.sharedUsers}`);
+        if (options.bindFirstMac) userCmd.push(`=caller-id=bind`);
+        userCmd.push(`=comment=NetCard_${card.batchId}`);
+        allCommands.push(userCmd);
 
-    // Execute batch
-    const chunkSize = options.turboMode ? 40 : 1;
-    for (let i = 0; i < sentences.length; i += chunkSize) {
-      const slice = sentences.slice(i, i + chunkSize);
-      try {
-        if (options.turboMode && slice.length > 1) {
-          await this.client.writeBatchSentences(slice);
-          added += slice.length;
-        } else {
-          await this.client.writeSentence(slice[0]);
-          added++;
+        if (profileToBind && profileToBind !== 'none') {
+          const profileCmd = [
+            '/tool/user-manager/user/create-and-activate-profile',
+            `=numbers=${card.username}`,
+            `=customer=${options.customer || 'admin'}`,
+            `=profile=${profileToBind}`,
+          ];
+          allCommands.push(profileCmd);
         }
-      } catch (e: any) {
-        failed += slice.length;
-        errors.push(e.message);
-      }
-      if (options.onProgress) {
-        options.onProgress(Math.min(i + chunkSize, sentences.length), sentences.length);
       }
     }
 
-    return { added, failed, errors };
+    if (options.turboMode) {
+      const concurrency = 8;
+      const results = await this.client.writeBatchSentences(allCommands, concurrency);
+      for (const res of results) {
+        const isTrap = res.some((r) => r.type === '!trap');
+        if (isTrap) {
+          failed++;
+          const trapMsg = res.find((r) => r.type === '!trap')?.attributes['message'] || 'خطأ في يوزر مانجر';
+          errors.push(trapMsg);
+        } else {
+          added++;
+        }
+      }
+      if (options.onProgress) {
+        options.onProgress(cards.length, cards.length);
+      }
+    } else {
+      for (let i = 0; i < allCommands.length; i++) {
+        try {
+          await this.client.writeSentence(allCommands[i]);
+          added++;
+        } catch (e: any) {
+          failed++;
+          errors.push(e.message);
+        }
+        if (options.onProgress && (i % 4 === 0 || i === allCommands.length - 1)) {
+          options.onProgress(Math.floor((i + 1) / 2), cards.length);
+        }
+      }
+    }
+
+    return { added: Math.round(added / (allCommands.length / cards.length)), failed, errors };
   }
 
   // ==================== BROADBAND / PPPoE ====================
@@ -310,23 +355,34 @@ export class MikroTikAdapter {
       `=comment=NetCard_PPPoE_${card.batchId}`,
     ]);
 
-    const chunkSize = options.turboMode ? 40 : 1;
-    for (let i = 0; i < sentences.length; i += chunkSize) {
-      const slice = sentences.slice(i, i + chunkSize);
-      try {
-        if (options.turboMode && slice.length > 1) {
-          await this.client.writeBatchSentences(slice);
-          added += slice.length;
+    if (options.turboMode) {
+      const concurrency = 8;
+      const results = await this.client.writeBatchSentences(sentences, concurrency);
+      for (const res of results) {
+        const isTrap = res.some((r) => r.type === '!trap');
+        if (isTrap) {
+          failed++;
+          const trapMsg = res.find((r) => r.type === '!trap')?.attributes['message'] || 'فشل إضافة اشتراك البرودباند';
+          errors.push(trapMsg);
         } else {
-          await this.client.writeSentence(slice[0]);
           added++;
         }
-      } catch (e: any) {
-        failed += slice.length;
-        errors.push(e.message);
       }
       if (options.onProgress) {
-        options.onProgress(Math.min(i + chunkSize, sentences.length), sentences.length);
+        options.onProgress(sentences.length, sentences.length);
+      }
+    } else {
+      for (let i = 0; i < sentences.length; i++) {
+        try {
+          await this.client.writeSentence(sentences[i]);
+          added++;
+        } catch (e: any) {
+          failed++;
+          errors.push(e.message);
+        }
+        if (options.onProgress && (i % 5 === 0 || i === sentences.length - 1)) {
+          options.onProgress(i + 1, sentences.length);
+        }
       }
     }
 
@@ -338,19 +394,29 @@ export class MikroTikAdapter {
   public generateRscScript(
     cards: GeneratedCard[],
     mode: 'hotspot' | 'usermanager' | 'broadband',
-    isV7 = false
+    isV7 = false,
+    options?: { bindMacOnFirstUse?: boolean; customer?: string }
   ): string {
     const lines: string[] = [
       '# ====================================================',
       '# NetCard Manager - MikroTik RouterOS Script (.rsc)',
-      `# Generated at: ${new Date().toISOString()}`,
-      `# Total Cards: ${cards.length}`,
-      `# Mode: ${mode.toUpperCase()} (RouterOS ${isV7 ? 'v7' : 'v6'})`,
+      `# تاريخ التوليد: ${new Date().toISOString()}`,
+      `# إجمالي الكروت: ${cards.length}`,
+      `# الوضع: ${mode.toUpperCase()} (RouterOS ${isV7 ? 'v7' : 'v6'})`,
       '# ====================================================',
       '',
     ];
 
     if (mode === 'hotspot') {
+      if (options?.bindMacOnFirstUse && cards.length > 0) {
+        const prof = cards[0].profile || 'default';
+        lines.push('# إعداد القفل التلقائي للماك أدرس عند أول تسجيل دخول');
+        lines.push(
+          `/ip hotspot user profile set [find name="${prof}"] on-login="{ :local mac $\\"mac-address\\"; /ip hotspot user set [find name=$user] mac-address=$mac }"`
+        );
+        lines.push('');
+      }
+
       lines.push('/ip hotspot user');
       for (const c of cards) {
         let cmd = `add name="${c.username}"`;
@@ -367,16 +433,35 @@ export class MikroTikAdapter {
         for (const c of cards) {
           let cmd = `add name="${c.username}"`;
           if (c.password) cmd += ` password="${c.password}"`;
+          if (options?.bindMacOnFirstUse) cmd += ` caller-id="bind"`;
           cmd += ` comment="NetCard_${c.batchId}"`;
           lines.push(cmd);
         }
+        lines.push('');
+        lines.push('/user-manager user-profile');
+        for (const c of cards) {
+          if (c.profile) {
+            lines.push(`add user="${c.username}" profile="${c.profile}" comment="NetCard_${c.batchId}"`);
+          }
+        }
       } else {
         lines.push('/tool user-manager user');
+        const cust = options?.customer || 'admin';
         for (const c of cards) {
-          let cmd = `add username="${c.username}" customer="admin"`;
+          let cmd = `add username="${c.username}" customer="${cust}"`;
           if (c.password) cmd += ` password="${c.password}"`;
+          if (options?.bindMacOnFirstUse) cmd += ` caller-id="bind"`;
           cmd += ` comment="NetCard_${c.batchId}"`;
           lines.push(cmd);
+        }
+        lines.push('');
+        lines.push('/tool user-manager user');
+        for (const c of cards) {
+          if (c.profile) {
+            lines.push(
+              `create-and-activate-profile numbers="${c.username}" customer="${cust}" profile="${c.profile}"`
+            );
+          }
         }
       }
     } else if (mode === 'broadband') {

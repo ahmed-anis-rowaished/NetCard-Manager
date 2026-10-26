@@ -81,6 +81,7 @@ export class CardGeneratorEngine {
         custom2: custom2El?.customText || '',
         templateId: template.id,
         posId: req.posId,
+        sharedUsers: req.sharedUsers || 1,
         isPrinted: req.switches.markPrinted,
         createdAt: nowIso,
         routerIp,

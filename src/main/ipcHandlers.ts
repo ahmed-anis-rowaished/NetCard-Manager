@@ -17,6 +17,9 @@ import {
   GenerationProgress,
 } from '../shared/types';
 
+// Execution lock to prevent concurrent overlapping batch runs
+let isGeneratingLock = false;
+
 export function setupIpcHandlers(
   db: AppDatabase,
   adapter: MikroTikAdapter,
@@ -72,7 +75,7 @@ export function setupIpcHandlers(
       }
       return { success: true, info };
     } catch (err: any) {
-      return { success: false, error: err.message };
+      return { success: false, error: err.message || 'فشل الاتصال بالمايكروتك' };
     }
   });
 
@@ -169,8 +172,17 @@ export function setupIpcHandlers(
     return true;
   });
 
-  // --- Batch Generation & Print Orchestrator ---
+  // --- Batch Generation & Print Orchestrator with Execution Lock ---
   ipcMain.handle('generator:executeBatch', async (_, req: CardBatchGenerationRequest) => {
+    if (isGeneratingLock) {
+      return {
+        success: false,
+        error: 'هناك عملية توليد وطباعة قيد التنفيذ حالياً، يرجى الانتظار حتى تكتمل',
+      };
+    }
+
+    isGeneratingLock = true;
+
     const notifyProgress = (p: GenerationProgress) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('generator:progress', p);
@@ -222,23 +234,28 @@ export function setupIpcHandlers(
             },
           });
           if (req.switches.transactionSafety && res.failed > 0 && res.added === 0) {
-            throw new Error(`فشلت إضافة الكروت في الراوتر: ${res.errors[0] || 'Unknown error'}`);
+            throw new Error(`فشلت إضافة الكروت في الراوتر: ${res.errors[0] || 'خطأ غير معروف'}`);
           }
         } else if (req.mode === 'usermanager') {
-          await adapter.addUserManagerUsers(cards, {
+          const res = await adapter.addUserManagerUsers(cards, {
             customer: req.umCustomer || 'admin',
+            profile: req.profileName,
+            bindFirstMac: req.switches.bindMacOnFirstUse,
             turboMode: true,
             onProgress: (cur, tot) => {
               notifyProgress({
                 step: 'pushing_router',
                 current: cur,
                 total: tot,
-                message: `تم إضافة ${cur} من أصل ${tot} كرت في اليوزر مانجر...`,
+                message: `تم إضافة وتفعيل ${cur} من أصل ${tot} كرت في اليوزر مانجر...`,
               });
             },
           });
+          if (req.switches.transactionSafety && res.failed > 0 && res.added === 0) {
+            throw new Error(`فشلت إضافة الكروت في اليوزر مانجر: ${res.errors[0] || 'خطأ غير معروف'}`);
+          }
         } else if (req.mode === 'broadband') {
-          await adapter.addPppSecrets(cards, {
+          const res = await adapter.addPppSecrets(cards, {
             turboMode: true,
             onProgress: (cur, tot) => {
               notifyProgress({
@@ -249,6 +266,9 @@ export function setupIpcHandlers(
               });
             },
           });
+          if (req.switches.transactionSafety && res.failed > 0 && res.added === 0) {
+            throw new Error(`فشلت إضافة اشتراكات البرودباند: ${res.errors[0] || 'خطأ غير معروف'}`);
+          }
         }
       }
 
@@ -258,7 +278,11 @@ export function setupIpcHandlers(
       // 5. Determine output directory
       let targetDir = template.savePath;
       if (!targetDir || !fs.existsSync(targetDir)) {
-        targetDir = path.join(process.env.USERPROFILE || process.env.HOME || '.', 'Documents', 'NetCard_Prints');
+        targetDir = path.join(
+          process.env.USERPROFILE || process.env.HOME || '.',
+          'Documents',
+          'NetCard_Prints'
+        );
       }
       if (!fs.existsSync(targetDir)) {
         fs.mkdirSync(targetDir, { recursive: true });
@@ -267,10 +291,23 @@ export function setupIpcHandlers(
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const baseFilename = `NetCards_${req.mode}_${cards[0].batchId}_${timestamp}`;
 
-      let pdfPath = '';
+      let pdfPath = path.join(targetDir, `${baseFilename}.pdf`);
       let excelPath = '';
       let rscPath = '';
       let txtPath = '';
+
+      // Prompt for PDF save location if switch is active
+      if (req.switches.savePdf && req.switches.promptPdfLocation && mainWindow) {
+        const saveDialogRes = await dialog.showSaveDialog(mainWindow, {
+          title: 'تحديد مكان حفظ ملف الكروت المجهزة للطباعة (PDF)',
+          defaultPath: pdfPath,
+          filters: [{ name: 'ملفات PDF', extensions: ['pdf'] }],
+        });
+        if (!saveDialogRes.canceled && saveDialogRes.filePath) {
+          pdfPath = saveDialogRes.filePath;
+          targetDir = path.dirname(pdfPath);
+        }
+      }
 
       // 6. Generate PDF if enabled
       if (req.switches.savePdf) {
@@ -278,10 +315,9 @@ export function setupIpcHandlers(
           step: 'rendering_pdf',
           current: cards.length,
           total: cards.length,
-          message: 'جاري تصيير شبكة الكروت وملف الطباعة PDF (300 DPI)...',
+          message: 'جاري تصيير شبكة الكروت وملف الطباعة بدقة 300 DPI مع النصوص العربية...',
         });
 
-        pdfPath = path.join(targetDir, `${baseFilename}.pdf`);
         await PdfGenerator.generateCardGridPdf(cards, template, pdfPath);
       }
 
@@ -297,7 +333,11 @@ export function setupIpcHandlers(
         const rscContent = adapter.generateRscScript(
           cards,
           req.mode,
-          adapter.getOsInfo()?.majorVersion === 7
+          adapter.getOsInfo()?.majorVersion === 7,
+          {
+            bindMacOnFirstUse: req.switches.bindMacOnFirstUse,
+            customer: req.umCustomer || 'admin',
+          }
         );
         fs.writeFileSync(rscPath, rscContent, 'utf8');
       }
@@ -306,7 +346,8 @@ export function setupIpcHandlers(
       if (req.switches.saveTxtCopy) {
         txtPath = path.join(targetDir, `${baseFilename}.txt`);
         const txtLines = cards.map(
-          (c) => `${c.serial}\t${c.username}\t${c.password || ''}\t${c.profile}\t${c.price} ${c.currency}`
+          (c) =>
+            `${c.serial}\t${c.username}\t${c.password || ''}\t${c.profile}\t${c.price} ${c.currency}`
         );
         fs.writeFileSync(txtPath, txtLines.join('\r\n'), 'utf8');
       }
@@ -320,8 +361,8 @@ export function setupIpcHandlers(
         step: 'completed',
         current: cards.length,
         total: cards.length,
-        message: 'تمت العملية بنجاح تام!',
-        pdfPath,
+        message: 'تمت عملية التوليد والطباعة بنجاح تام!',
+        pdfPath: req.switches.savePdf ? pdfPath : undefined,
         excelPath,
         rscPath,
         txtPath,
@@ -331,7 +372,7 @@ export function setupIpcHandlers(
         success: true,
         cardsCount: cards.length,
         batchId: cards[0].batchId,
-        pdfPath,
+        pdfPath: req.switches.savePdf ? pdfPath : undefined,
         excelPath,
         rscPath,
         txtPath,
@@ -344,6 +385,8 @@ export function setupIpcHandlers(
         message: err.message,
       });
       return { success: false, error: err.message };
+    } finally {
+      isGeneratingLock = false;
     }
   });
 
@@ -351,6 +394,7 @@ export function setupIpcHandlers(
   ipcMain.handle('system:selectDirectory', async () => {
     if (!mainWindow) return null;
     const res = await dialog.showOpenDialog(mainWindow, {
+      title: 'اختر مجلد حفظ ملفات الطباعة',
       properties: ['openDirectory', 'createDirectory'],
     });
     if (!res.canceled && res.filePaths.length > 0) {
@@ -362,8 +406,9 @@ export function setupIpcHandlers(
   ipcMain.handle('system:selectImage', async () => {
     if (!mainWindow) return null;
     const res = await dialog.showOpenDialog(mainWindow, {
+      title: 'اختر صورة الخلفية أو الشعار',
       properties: ['openFile'],
-      filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp'] }],
+      filters: [{ name: 'صور (Images)', extensions: ['jpg', 'jpeg', 'png', 'webp', 'svg'] }],
     });
     if (!res.canceled && res.filePaths.length > 0) {
       const filePath = res.filePaths[0];
