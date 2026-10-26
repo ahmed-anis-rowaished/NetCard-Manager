@@ -149,6 +149,7 @@ export const App: React.FC = () => {
           <TemplateDesignerView
             hotspotProfiles={hotspotProfiles}
             posLocations={posLocations}
+            onTemplatesUpdated={loadDatabaseData}
           />
         )}
 

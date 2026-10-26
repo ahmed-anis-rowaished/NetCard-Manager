@@ -38,11 +38,13 @@ import {
 interface TemplateDesignerViewProps {
   hotspotProfiles: HotspotUserProfile[];
   posLocations: POSLocation[];
+  onTemplatesUpdated?: () => void;
 }
 
 export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
   hotspotProfiles,
   posLocations,
+  onTemplatesUpdated,
 }) => {
   const [templates, setTemplates] = useState<CardTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | undefined>(1);
@@ -170,6 +172,7 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
       setSelectedTemplateId(newId);
       setTemplate(newTmpl);
       setIsNewTemplateModalOpen(false);
+      onTemplatesUpdated?.();
       showFeedback('تم إنشاء القالب الجديد بنجاح', 'success');
     }
   };
@@ -199,6 +202,7 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
         const resolved = await ensureImageDataUrls(clonedTemplate);
         setTemplate(resolved);
         setIsDuplicateModalOpen(false);
+        onTemplatesUpdated?.();
         showFeedback(`تم نسخ القالب بنجاح باسم: ${clonedTemplate.name}`, 'success');
       }
     } catch (err: any) {
@@ -212,6 +216,7 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
       const savedId = await window.netcardAPI.saveTemplate(template);
       setTemplate({ ...template, id: savedId });
       await loadTemplates();
+      onTemplatesUpdated?.();
       showFeedback('تم حفظ تعديلات القالب بنجاح في قاعدة البيانات', 'success');
     } catch (err: any) {
       showFeedback(err.message || 'فشل حفظ القالب', 'error');
@@ -228,6 +233,7 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
 
     await window.netcardAPI.deleteTemplate(template.id);
     await loadTemplates();
+    onTemplatesUpdated?.();
     setIsDeleteModalOpen(false);
     showFeedback('تم حذف القالب بنجاح', 'success');
   };
