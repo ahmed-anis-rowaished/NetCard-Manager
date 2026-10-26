@@ -59,6 +59,34 @@ export const ProfilesManagerView: React.FC<ProfilesManagerViewProps> = ({
     currency: 'ريال',
   });
 
+  // Modal State for Editing Profile
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editProfileData, setEditProfileData] = useState<{
+    id: string;
+    originalName: string;
+    mode: MikroTikServiceMode;
+    rateLimit?: string;
+    sharedUsers?: number;
+    sessionTimeout?: string;
+    validity?: string;
+    price?: number;
+    currency?: string;
+    localAddress?: string;
+    remoteAddress?: string;
+  }>({
+    id: '',
+    originalName: '',
+    mode: 'hotspot',
+    rateLimit: '',
+    sharedUsers: 1,
+    sessionTimeout: '',
+    validity: '',
+    price: 0,
+    currency: 'ريال',
+    localAddress: '',
+    remoteAddress: '',
+  });
+
   // Delete Confirm Modal
   const [profileToDelete, setProfileToDelete] = useState<{ id: string; name: string } | null>(null);
 
@@ -159,6 +187,89 @@ export const ProfilesManagerView: React.FC<ProfilesManagerViewProps> = ({
       if (onRefreshNeeded) onRefreshNeeded();
     } catch (err: any) {
       showFeedback(`فشل إنشاء الباقة: ${err.message}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpenEditModal = (mode: MikroTikServiceMode, profile: any) => {
+    const meta = getMeta(mode, profile.name);
+    setEditProfileData({
+      id: profile.id || profile.name,
+      originalName: profile.name,
+      mode,
+      rateLimit: profile.rateLimit || meta?.rateLimit || '',
+      sharedUsers: profile.sharedUsers || meta?.sharedUsers || 1,
+      sessionTimeout: profile.uptimeLimit || profile.sessionTimeout || '',
+      validity: profile.validity || meta?.validity || '',
+      price: meta?.price !== undefined ? meta.price : (profile.price || 0),
+      currency: meta?.currency || 'ريال',
+      localAddress: profile.localAddress || '',
+      remoteAddress: profile.remoteAddress || '',
+    });
+    setIsEditModalOpen(true);
+  };
+
+  const handleSaveEditProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!window.netcardAPI) return;
+    setLoading(true);
+
+    try {
+      if (isConnected) {
+        if (editProfileData.mode === 'hotspot') {
+          await window.netcardAPI.updateHotspotProfile(
+            editProfileData.originalName,
+            {
+              name: editProfileData.originalName,
+              mode: 'hotspot',
+              rateLimit: editProfileData.rateLimit,
+              sharedUsers: editProfileData.sharedUsers,
+              sessionTimeout: editProfileData.sessionTimeout,
+            }
+          );
+        } else if (editProfileData.mode === 'usermanager') {
+          await window.netcardAPI.updateUserManagerProfile(
+            editProfileData.originalName,
+            {
+              name: editProfileData.originalName,
+              mode: 'usermanager',
+              rateLimit: editProfileData.rateLimit,
+              validity: editProfileData.validity,
+              price: editProfileData.price,
+            }
+          );
+        } else if (editProfileData.mode === 'broadband') {
+          await window.netcardAPI.updatePppProfile(
+            editProfileData.originalName,
+            {
+              name: editProfileData.originalName,
+              mode: 'broadband',
+              rateLimit: editProfileData.rateLimit,
+              localAddress: editProfileData.localAddress,
+              remoteAddress: editProfileData.remoteAddress,
+            }
+          );
+        }
+      }
+
+      // Save local metadata (price, currency, validity, rateLimit)
+      await window.netcardAPI.saveProfileMetadata({
+        mode: editProfileData.mode,
+        name: editProfileData.originalName,
+        price: editProfileData.price || 0,
+        currency: editProfileData.currency || 'ريال',
+        validity: editProfileData.validity || '',
+        rateLimit: editProfileData.rateLimit || '',
+        sharedUsers: editProfileData.sharedUsers || 1,
+      });
+
+      showFeedback(`تم تحديث بيانات الباقة (${editProfileData.originalName}) بنجاح!`, 'success');
+      setIsEditModalOpen(false);
+      await loadAllProfiles();
+      if (onRefreshNeeded) onRefreshNeeded();
+    } catch (err: any) {
+      showFeedback(`فشل تعديل الباقة: ${err.message}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -342,15 +453,24 @@ export const ProfilesManagerView: React.FC<ProfilesManagerViewProps> = ({
                           {meta?.price ? `${meta.price} ${meta.currency || 'ريال'}` : 'غير محدد'}
                         </td>
                         <td className="py-2.5 px-3 text-center">
-                          {p.name !== 'default' && (
+                          <div className="flex items-center justify-center gap-1">
                             <button
-                              onClick={() => setProfileToDelete({ id: p.id, name: p.name })}
-                              title="حذف الباقة من الراوتر"
-                              className="p-1 rounded-lg hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors"
+                              onClick={() => handleOpenEditModal('hotspot', p)}
+                              title="تعديل الباقة"
+                              className="p-1 rounded-lg hover:bg-space-accent/20 text-space-accent hover:text-white transition-colors"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Edit2 className="w-4 h-4" />
                             </button>
-                          )}
+                            {p.name !== 'default' && (
+                              <button
+                                onClick={() => setProfileToDelete({ id: p.id, name: p.name })}
+                                title="حذف الباقة من الراوتر"
+                                className="p-1 rounded-lg hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -397,13 +517,22 @@ export const ProfilesManagerView: React.FC<ProfilesManagerViewProps> = ({
                           {meta?.price ? `${meta.price} ${meta.currency || 'ريال'}` : `${p.price} ريال`}
                         </td>
                         <td className="py-2.5 px-3 text-center">
-                          <button
-                            onClick={() => setProfileToDelete({ id: p.id, name: p.name })}
-                            title="حذف الباقة من الراوتر"
-                            className="p-1 rounded-lg hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => handleOpenEditModal('usermanager', p)}
+                              title="تعديل الباقة"
+                              className="p-1 rounded-lg hover:bg-space-accent/20 text-space-accent hover:text-white transition-colors"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => setProfileToDelete({ id: p.id, name: p.name })}
+                              title="حذف الباقة من الراوتر"
+                              className="p-1 rounded-lg hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -459,15 +588,24 @@ export const ProfilesManagerView: React.FC<ProfilesManagerViewProps> = ({
                           {meta?.price ? `${meta.price} ${meta.currency || 'ريال'}` : 'غير محدد'}
                         </td>
                         <td className="py-2.5 px-3 text-center">
-                          {p.name !== 'default' && (
+                          <div className="flex items-center justify-center gap-1">
                             <button
-                              onClick={() => setProfileToDelete({ id: p.id, name: p.name })}
-                              title="حذف الباقة من الراوتر"
-                              className="p-1 rounded-lg hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors"
+                              onClick={() => handleOpenEditModal('broadband', p)}
+                              title="تعديل الباقة"
+                              className="p-1 rounded-lg hover:bg-space-accent/20 text-space-accent hover:text-white transition-colors"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Edit2 className="w-4 h-4" />
                             </button>
-                          )}
+                            {p.name !== 'default' && (
+                              <button
+                                onClick={() => setProfileToDelete({ id: p.id, name: p.name })}
+                                title="حذف الباقة من الراوتر"
+                                className="p-1 rounded-lg hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -664,6 +802,209 @@ export const ProfilesManagerView: React.FC<ProfilesManagerViewProps> = ({
                 >
                   <Check className="w-4 h-4" />
                   <span>حفظ وإرسال للراوتر</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Profile Modal */}
+      {isEditModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-space-dark border border-space-border/80 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-fade-in">
+            <div className="px-5 py-3.5 border-b border-space-border/60 flex items-center justify-between bg-space-darkest/70">
+              <div className="flex items-center gap-2">
+                <Edit2 className="w-5 h-5 text-space-cyan" />
+                <h3 className="text-sm font-bold text-white">
+                  تعديل باقة ({editProfileData.originalName})
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsEditModalOpen(false)}
+                className="p-1 rounded-lg text-purple-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditProfile} className="p-5 space-y-3.5 text-xs">
+              {/* Profile Name & Service Badge */}
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-space-darkest/70 border border-space-border/50">
+                <div>
+                  <span className="text-[11px] text-purple-300 block">اسم الباقة:</span>
+                  <span className="text-sm font-black text-white font-mono">{editProfileData.originalName}</span>
+                </div>
+                <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-space-accent/20 text-space-pink border border-space-accent/40">
+                  {editProfileData.mode === 'hotspot'
+                    ? 'هوت سبوت'
+                    : editProfileData.mode === 'usermanager'
+                    ? 'يوزر مانجر'
+                    : 'برودباند PPPoE'}
+                </span>
+              </div>
+
+              {/* Rate Limit & Presets */}
+              <div>
+                <span className="text-purple-300 font-bold block mb-1">
+                  السرعة المحددة (Rate Limit Rx/Tx):
+                </span>
+                <input
+                  type="text"
+                  value={editProfileData.rateLimit || ''}
+                  onChange={(e) => setEditProfileData({ ...editProfileData, rateLimit: e.target.value })}
+                  placeholder="مثال: 2M/5M أو 1024k/2048k"
+                  className="w-full bg-space-darkest border border-space-border rounded-xl px-3 py-2 text-white font-mono focus:border-space-accent focus:outline-none mb-1.5"
+                />
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {['512k/1M', '1M/2M', '2M/5M', '4M/8M', '10M/20M'].map((speed) => (
+                    <button
+                      key={speed}
+                      type="button"
+                      onClick={() => setEditProfileData({ ...editProfileData, rateLimit: speed })}
+                      className="px-2 py-0.5 rounded bg-space-darkest border border-space-border text-[10px] text-space-cyan hover:border-space-accent"
+                    >
+                      {speed}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Hotspot specific: Shared Users & Session Timeout */}
+              {editProfileData.mode === 'hotspot' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <span className="text-purple-300 font-bold block mb-1">المشتركون (Shared Users):</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={editProfileData.sharedUsers || 1}
+                      onChange={(e) =>
+                        setEditProfileData({
+                          ...editProfileData,
+                          sharedUsers: parseInt(e.target.value, 10) || 1,
+                        })
+                      }
+                      className="w-full bg-space-darkest border border-space-border rounded-xl px-3 py-2 text-white focus:border-space-accent focus:outline-none font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <span className="text-purple-300 font-bold block mb-1">
+                      مهلة الجلسة (Session / Keepalive Timeout):
+                    </span>
+                    <input
+                      type="text"
+                      value={editProfileData.sessionTimeout || ''}
+                      onChange={(e) =>
+                        setEditProfileData({ ...editProfileData, sessionTimeout: e.target.value })
+                      }
+                      placeholder="مثال: 02:00:00 أو 1d"
+                      className="w-full bg-space-darkest border border-space-border rounded-xl px-3 py-2 text-white focus:border-space-accent focus:outline-none font-mono"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Broadband specific: Local & Remote Address */}
+              {editProfileData.mode === 'broadband' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <span className="text-purple-300 font-bold block mb-1">العنوان المحلي (Local Address):</span>
+                    <input
+                      type="text"
+                      value={editProfileData.localAddress || ''}
+                      onChange={(e) =>
+                        setEditProfileData({ ...editProfileData, localAddress: e.target.value })
+                      }
+                      placeholder="مثال: 10.0.0.1"
+                      className="w-full bg-space-darkest border border-space-border rounded-xl px-3 py-2 text-white focus:border-space-accent focus:outline-none font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <span className="text-purple-300 font-bold block mb-1">العنوان البعيد (Remote Pool):</span>
+                    <input
+                      type="text"
+                      value={editProfileData.remoteAddress || ''}
+                      onChange={(e) =>
+                        setEditProfileData({ ...editProfileData, remoteAddress: e.target.value })
+                      }
+                      placeholder="مثال: pppoe-pool"
+                      className="w-full bg-space-darkest border border-space-border rounded-xl px-3 py-2 text-white focus:border-space-accent focus:outline-none font-mono"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Validity */}
+              <div>
+                <span className="text-purple-300 font-bold block mb-1">
+                  مدة الصلاحية (Validity / Uptime):
+                </span>
+                <input
+                  type="text"
+                  value={editProfileData.validity || ''}
+                  onChange={(e) =>
+                    setEditProfileData({ ...editProfileData, validity: e.target.value })
+                  }
+                  placeholder="مثال: 3d أو 7d أو 30d"
+                  className="w-full bg-space-darkest border border-space-border rounded-xl px-3 py-2 text-white focus:border-space-accent focus:outline-none font-mono"
+                />
+              </div>
+
+              {/* Price & Currency */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <span className="text-purple-300 font-bold block mb-1">السعر (Price):</span>
+                  <input
+                    type="number"
+                    value={editProfileData.price || 0}
+                    onChange={(e) =>
+                      setEditProfileData({
+                        ...editProfileData,
+                        price: parseFloat(e.target.value) || 0,
+                      })
+                    }
+                    className="w-full bg-space-darkest border border-space-border rounded-xl px-3 py-2 text-emerald-400 font-bold font-mono focus:border-space-accent focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <span className="text-purple-300 font-bold block mb-1">العملة:</span>
+                  <select
+                    value={editProfileData.currency || 'ريال'}
+                    onChange={(e) =>
+                      setEditProfileData({ ...editProfileData, currency: e.target.value })
+                    }
+                    className="w-full bg-space-darkest border border-space-border rounded-xl px-3 py-2 text-white focus:border-space-accent focus:outline-none"
+                  >
+                    <option value="ريال">ريال</option>
+                    <option value="دولار">دولار ($)</option>
+                    <option value="د.ع">دينار عراقي</option>
+                    <option value="ل.س">ليرة سورية</option>
+                    <option value="ج.م">جنيه مصري</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-3 border-t border-space-border/60 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-space-darkest border border-space-border text-purple-300 hover:text-white"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-gradient-to-r from-space-cyan to-space-accent hover:opacity-95 text-white font-bold shadow-neon-cyan disabled:opacity-50"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>تطبيق التعديلات في الراوتر والقاعدة</span>
                 </button>
               </div>
             </form>

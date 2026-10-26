@@ -103,8 +103,21 @@ export function setupIpcHandlers(
     }
   });
 
+  ipcMain.handle('mikrotik:getHotspotServers', async () => {
+    try {
+      return await adapter.getHotspotServers();
+    } catch {
+      return ['all'];
+    }
+  });
+
   ipcMain.handle('mikrotik:createHotspotProfile', async (_, data) => {
     await adapter.createHotspotProfile(data);
+    return true;
+  });
+
+  ipcMain.handle('mikrotik:updateHotspotProfile', async (_, idOrName: string, data: any) => {
+    await adapter.updateHotspotProfile(idOrName, data);
     return true;
   });
 
@@ -126,6 +139,11 @@ export function setupIpcHandlers(
     return true;
   });
 
+  ipcMain.handle('mikrotik:updateUserManagerProfile', async (_, idOrName: string, data: any) => {
+    await adapter.updateUserManagerProfile(idOrName, data);
+    return true;
+  });
+
   ipcMain.handle('mikrotik:deleteUserManagerProfile', async (_, idOrName: string) => {
     await adapter.deleteUserManagerProfile(idOrName);
     return true;
@@ -135,7 +153,7 @@ export function setupIpcHandlers(
     try {
       return await adapter.getUserManagerCustomers();
     } catch {
-      return ['admin'];
+      return ['admin', 'default'];
     }
   });
 
@@ -149,6 +167,11 @@ export function setupIpcHandlers(
 
   ipcMain.handle('mikrotik:createPppProfile', async (_, data) => {
     await adapter.createPppProfile(data);
+    return true;
+  });
+
+  ipcMain.handle('mikrotik:updatePppProfile', async (_, idOrName: string, data: any) => {
+    await adapter.updatePppProfile(idOrName, data);
     return true;
   });
 
@@ -279,6 +302,7 @@ export function setupIpcHandlers(
         if (req.mode === 'hotspot') {
           const res = await adapter.addHotspotUsers(cards, {
             bindMacOnFirstUse: req.switches.bindMacOnFirstUse,
+            server: req.hotspotServer,
             turboMode: true,
             onProgress: (cur, tot) => {
               notifyProgress({

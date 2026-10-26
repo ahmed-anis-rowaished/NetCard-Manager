@@ -122,24 +122,46 @@ export class MikroTikAdapter {
       this.osInfo = currentInfo;
     } catch (e) {}
 
+    const isV7 = currentInfo?.majorVersion === 7 || this.osInfo?.majorVersion === 7;
+
+    // Fetch live user and active session counts in ~1-5ms with zero CPU overhead using =count-only=
+    const [
+      hotspotUsersCount,
+      hotspotActiveCount,
+      pppSecretsCount,
+      pppActiveCount,
+      userManagerUsersCount,
+      userManagerActiveCount,
+    ] = await Promise.all([
+      this.client.writeCountQuery('/ip/hotspot/user/print'),
+      this.client.writeCountQuery('/ip/hotspot/active/print'),
+      this.client.writeCountQuery('/ppp/secret/print'),
+      this.client.writeCountQuery('/ppp/active/print'),
+      this.client.writeCountQuery(isV7 ? '/user-manager/user/print' : '/tool/user-manager/user/print'),
+      this.client.writeCountQuery(
+        isV7 ? '/user-manager/session/print' : '/tool/user-manager/session/print',
+        isV7 ? ['?active=true'] : []
+      ),
+    ]);
+
     const counts = {
-      hotspotUsers: 0,
-      hotspotActive: 0,
-      userManagerUsers: 0,
-      userManagerActive: 0,
-      pppSecrets: 0,
-      pppActive: 0,
+      hotspotUsers: hotspotUsersCount,
+      hotspotActive: hotspotActiveCount,
+      userManagerUsers: userManagerUsersCount,
+      userManagerActive: userManagerActiveCount,
+      pppSecrets: pppSecretsCount,
+      pppActive: pppActiveCount,
     };
+
     const activeSessions: ActiveSessionItem[] = [];
 
-    // 1. Hotspot stats & active sessions
+    // Fetch lightweight sample (max 25 items) with specific proplist for the active sessions table
     try {
-      const hsUsers = await this.client.writeSentence(['/ip/hotspot/user/print']);
-      counts.hotspotUsers = hsUsers.filter((r) => r.type === '!re').length;
-
-      const hsActive = await this.client.writeSentence(['/ip/hotspot/active/print']);
-      const activeItems = hsActive.filter((r) => r.type === '!re');
-      counts.hotspotActive = activeItems.length;
+      const hsActive = await this.client.writeSentence([
+        '/ip/hotspot/active/print',
+        '=.proplist=.id,user,address,mac-address,uptime,bytes-in,bytes-out',
+      ]);
+      const activeItems = hsActive.filter((r) => r.type === '!re').slice(0, 25);
 
       for (const item of activeItems) {
         activeSessions.push({
@@ -151,76 +173,6 @@ export class MikroTikAdapter {
           service: 'hotspot',
           bytesIn: this.formatBytes(parseInt(item.attributes['bytes-in'] || '0', 10)),
           bytesOut: this.formatBytes(parseInt(item.attributes['bytes-out'] || '0', 10)),
-        });
-      }
-    } catch (e) {}
-
-    // 2. UserManager stats & active sessions
-    try {
-      const isV7 = this.osInfo?.majorVersion === 7;
-      if (isV7) {
-        const umUsers = await this.client.writeSentence(['/user-manager/user/print']);
-        counts.userManagerUsers = umUsers.filter((r) => r.type === '!re').length;
-
-        const umActive = await this.client.writeSentence(['/user-manager/session/print']);
-        const umActiveItems = umActive.filter(
-          (r) => r.type === '!re' && r.attributes['active'] !== 'no'
-        );
-        counts.userManagerActive = umActiveItems.length;
-
-        for (const item of umActiveItems) {
-          activeSessions.push({
-            id: item.attributes['.id'],
-            user: item.attributes['user'] || '',
-            address: item.attributes['host-ip'] || '',
-            macAddress: item.attributes['calling-station-id'] || '',
-            uptime: item.attributes['uptime'] || '',
-            service: 'usermanager',
-            bytesIn: this.formatBytes(parseInt(item.attributes['upload'] || '0', 10)),
-            bytesOut: this.formatBytes(parseInt(item.attributes['download'] || '0', 10)),
-          });
-        }
-      } else {
-        const umUsers = await this.client.writeSentence(['/tool/user-manager/user/print']);
-        counts.userManagerUsers = umUsers.filter((r) => r.type === '!re').length;
-
-        try {
-          const umActive = await this.client.writeSentence([
-            '/tool/user-manager/active-sessions/print',
-          ]);
-          const umActiveItems = umActive.filter((r) => r.type === '!re');
-          counts.userManagerActive = umActiveItems.length;
-          for (const item of umActiveItems) {
-            activeSessions.push({
-              id: item.attributes['.id'],
-              user: item.attributes['user'] || item.attributes['username'] || '',
-              address: item.attributes['ip-address'] || '',
-              macAddress: item.attributes['calling-station-id'] || '',
-              uptime: item.attributes['uptime'] || '',
-              service: 'usermanager',
-            });
-          }
-        } catch (e) {}
-      }
-    } catch (e) {}
-
-    // 3. PPP (Broadband) stats & active sessions
-    try {
-      const pppSecrets = await this.client.writeSentence(['/ppp/secret/print']);
-      counts.pppSecrets = pppSecrets.filter((r) => r.type === '!re').length;
-
-      const pppActive = await this.client.writeSentence(['/ppp/active/print']);
-      const pppActiveItems = pppActive.filter((r) => r.type === '!re');
-      counts.pppActive = pppActiveItems.length;
-
-      for (const item of pppActiveItems) {
-        activeSessions.push({
-          id: item.attributes['.id'],
-          user: item.attributes['name'] || '',
-          address: item.attributes['address'] || '',
-          macAddress: item.attributes['caller-id'] || '',
-          uptime: item.attributes['uptime'] || '',
-          service: 'ppp',
         });
       }
     } catch (e) {}
@@ -264,7 +216,10 @@ export class MikroTikAdapter {
 
   public async getHotspotProfiles(): Promise<HotspotUserProfile[]> {
     if (!this.client) throw new Error('الراوتر غير متصل');
-    const results = await this.client.writeSentence(['/ip/hotspot/user/profile/print']);
+    const results = await this.client.writeSentence([
+      '/ip/hotspot/user/profile/print',
+      '=.proplist=.id,name,shared-users,rate-limit,session-timeout,on-login',
+    ]);
     return results
       .filter((r) => r.type === '!re')
       .map((r) => ({
@@ -272,8 +227,25 @@ export class MikroTikAdapter {
         name: r.attributes['name'] || '',
         sharedUsers: parseInt(r.attributes['shared-users'] || '1', 10),
         rateLimit: r.attributes['rate-limit'] || '',
-        uptimeLimit: r.attributes['keepalive-timeout'] || '',
+        uptimeLimit: r.attributes['session-timeout'] || '',
       }));
+  }
+
+  public async getHotspotServers(): Promise<string[]> {
+    if (!this.client) return ['all'];
+    try {
+      const res = await this.client.writeSentence([
+        '/ip/hotspot/print',
+        '=.proplist=.id,name,interface',
+      ]);
+      const servers = res
+        .filter((r) => r.type === '!re')
+        .map((r) => r.attributes['name'])
+        .filter(Boolean);
+      return ['all', ...servers];
+    } catch {
+      return ['all'];
+    }
   }
 
   public async createHotspotProfile(data: CreateProfileParams): Promise<void> {
@@ -283,6 +255,27 @@ export class MikroTikAdapter {
     if (data.sharedUsers) cmd.push(`=shared-users=${data.sharedUsers}`);
     if (data.sessionTimeout) cmd.push(`=session-timeout=${data.sessionTimeout}`);
     await this.client.writeSentence(cmd);
+  }
+
+  public async updateHotspotProfile(idOrName: string, data: Partial<CreateProfileParams>): Promise<void> {
+    if (!this.client) throw new Error('الراوتر غير متصل');
+    try {
+      const res = await this.client.writeSentence([
+        '/ip/hotspot/user/profile/print',
+        `?name=${idOrName}`,
+      ]);
+      const found = res.find((r) => r.type === '!re');
+      const targetId = found?.attributes['.id'] || idOrName;
+
+      const cmd = ['/ip/hotspot/user/profile/set', `=.id=${targetId}`];
+      if (data.name) cmd.push(`=name=${data.name}`);
+      if (data.rateLimit !== undefined) cmd.push(`=rate-limit=${data.rateLimit}`);
+      if (data.sharedUsers !== undefined) cmd.push(`=shared-users=${data.sharedUsers}`);
+      if (data.sessionTimeout !== undefined) cmd.push(`=session-timeout=${data.sessionTimeout}`);
+      await this.client.writeSentence(cmd);
+    } catch (e: any) {
+      throw new Error(`فشل تعديل باقة الهوت سبوت: ${e.message}`);
+    }
   }
 
   public async deleteHotspotProfile(idOrName: string): Promise<void> {
@@ -304,6 +297,7 @@ export class MikroTikAdapter {
     cards: GeneratedCard[],
     options: {
       bindMacOnFirstUse?: boolean;
+      server?: string;
       turboMode?: boolean;
       onProgress?: (current: number, total: number) => void;
     } = {}
@@ -353,6 +347,9 @@ export class MikroTikAdapter {
       }
       if (card.profile) {
         s.push(`=profile=${card.profile}`);
+      }
+      if (options.server && options.server !== 'all') {
+        s.push(`=server=${options.server}`);
       }
       if (card.validity) {
         s.push(`=limit-uptime=${card.validity}`);
@@ -408,20 +405,55 @@ export class MikroTikAdapter {
     if (!this.client || !this.osInfo) throw new Error('الراوتر غير متصل');
 
     const isV7 = this.osInfo.majorVersion === 7;
-    const cmd = isV7 ? '/user-manager/profile/print' : '/tool/user-manager/profile/print';
+    if (isV7) {
+      let profiles: any[] = [];
+      try {
+        const profRes = await this.client.writeSentence([
+          '/user-manager/profile/print',
+          '=.proplist=.id,name,price,validity,starts-when',
+        ]);
+        profiles = profRes.filter((r) => r.type === '!re');
+      } catch (e) {}
 
-    try {
-      const results = await this.client.writeSentence([cmd]);
-      return results
-        .filter((r) => r.type === '!re')
-        .map((r) => ({
-          id: r.attributes['.id'] || '',
-          name: r.attributes['name'] || '',
-          price: parseFloat(r.attributes['price'] || '0'),
-          validity: r.attributes['validity'] || '',
-        }));
-    } catch (e) {
-      return [];
+      // Fetch limitations with independent try/catch
+      const limitsMap = new Map<string, string>();
+      try {
+        const limRes = await this.client.writeSentence([
+          '/user-manager/limitation/print',
+          '=.proplist=.id,name,transfer-limit,uptime-limit,rate-limit-rx,rate-limit-tx',
+        ]);
+        for (const l of limRes.filter((r) => r.type === '!re')) {
+          const rx = l.attributes['rate-limit-rx'];
+          const tx = l.attributes['rate-limit-tx'];
+          if (rx && tx) limitsMap.set(l.attributes['name'], `${rx}/${tx}`);
+        }
+      } catch (e) {}
+
+      return profiles.map((r) => ({
+        id: r.attributes['.id'] || '',
+        name: r.attributes['name'] || '',
+        price: parseFloat(r.attributes['price'] || '0'),
+        validity: r.attributes['validity'] || '',
+        downloadLimit: limitsMap.get(`${r.attributes['name']}_lim`) || '',
+      }));
+    } else {
+      // RouterOS v6
+      try {
+        const results = await this.client.writeSentence([
+          '/tool/user-manager/profile/print',
+          '=.proplist=.id,name,price,validity',
+        ]);
+        return results
+          .filter((r) => r.type === '!re')
+          .map((r) => ({
+            id: r.attributes['.id'] || '',
+            name: r.attributes['name'] || '',
+            price: parseFloat(r.attributes['price'] || '0'),
+            validity: r.attributes['validity'] || '',
+          }));
+      } catch (e) {
+        return [];
+      }
     }
   }
 
@@ -475,6 +507,49 @@ export class MikroTikAdapter {
     }
   }
 
+  public async updateUserManagerProfile(idOrName: string, data: Partial<CreateProfileParams>): Promise<void> {
+    if (!this.client || !this.osInfo) throw new Error('الراوتر غير متصل');
+    const isV7 = this.osInfo.majorVersion === 7;
+    const prefix = isV7 ? '/user-manager/profile' : '/tool/user-manager/profile';
+
+    try {
+      const res = await this.client.writeSentence([`${prefix}/print`, `?name=${idOrName}`]);
+      const found = res.find((r) => r.type === '!re');
+      const targetId = found?.attributes['.id'] || idOrName;
+
+      const cmd = [`${prefix}/set`, `=.id=${targetId}`];
+      if (data.name) cmd.push(`=name=${data.name}`);
+      if (data.validity !== undefined) cmd.push(`=validity=${data.validity}`);
+      if (data.price !== undefined) cmd.push(`=price=${data.price}`);
+      await this.client.writeSentence(cmd);
+
+      // In v7, update limitation if rateLimit was modified
+      if (isV7 && data.rateLimit) {
+        try {
+          const limName = `${data.name || idOrName}_lim`;
+          const limRes = await this.client.writeSentence([
+            '/user-manager/limitation/print',
+            `?name=${limName}`,
+          ]);
+          const limFound = limRes.find((r) => r.type === '!re');
+          if (limFound) {
+            const limId = limFound.attributes['.id'] || limName;
+            const limCmd = ['/user-manager/limitation/set', `=.id=${limId}`];
+            const parts = data.rateLimit.split('/');
+            if (parts.length === 2) {
+              limCmd.push(`=rate-limit-rx=${parts[0]}`, `=rate-limit-tx=${parts[1]}`);
+            } else {
+              limCmd.push(`=rate-limit-rx=${data.rateLimit}`, `=rate-limit-tx=${data.rateLimit}`);
+            }
+            await this.client.writeSentence(limCmd);
+          }
+        } catch (e) {}
+      }
+    } catch (e: any) {
+      throw new Error(`فشل تعديل باقة اليوزر مانجر: ${e.message}`);
+    }
+  }
+
   public async deleteUserManagerProfile(idOrName: string): Promise<void> {
     if (!this.client || !this.osInfo) throw new Error('الراوتر غير متصل');
     const isV7 = this.osInfo.majorVersion === 7;
@@ -491,20 +566,50 @@ export class MikroTikAdapter {
   }
 
   public async getUserManagerCustomers(): Promise<string[]> {
-    if (!this.client || !this.osInfo) return ['admin'];
+    if (!this.client || !this.osInfo) return ['admin', 'default'];
     const isV7 = this.osInfo.majorVersion === 7;
-    if (isV7) return ['admin'];
+
+    if (!isV7) {
+      try {
+        const results = await this.client.writeSentence([
+          '/tool/user-manager/customer/print',
+          '=.proplist=login',
+        ]);
+        const list = results
+          .filter((r) => r.type === '!re')
+          .map((r) => r.attributes['login'] || r.attributes['name'])
+          .filter(Boolean);
+        return list.length ? list : ['admin'];
+      } catch {
+        return ['admin'];
+      }
+    }
+
+    // In RouterOS v7: fetch routers and user-groups
+    const list: string[] = ['admin', 'default'];
+    try {
+      const routers = await this.client.writeSentence([
+        '/user-manager/router/print',
+        '=.proplist=name',
+      ]);
+      for (const r of routers.filter((x) => x.type === '!re')) {
+        const n = r.attributes['name'];
+        if (n && !list.includes(n)) list.push(n);
+      }
+    } catch {}
 
     try {
-      const results = await this.client.writeSentence(['/tool/user-manager/customer/print']);
-      const list = results
-        .filter((r) => r.type === '!re')
-        .map((r) => r.attributes['login'] || r.attributes['name'])
-        .filter(Boolean);
-      return list.length ? list : ['admin'];
-    } catch {
-      return ['admin'];
-    }
+      const groups = await this.client.writeSentence([
+        '/user-manager/user-group/print',
+        '=.proplist=name',
+      ]);
+      for (const g of groups.filter((x) => x.type === '!re')) {
+        const n = g.attributes['name'];
+        if (n && !list.includes(n)) list.push(n);
+      }
+    } catch {}
+
+    return list;
   }
 
   public async addUserManagerUsers(
@@ -611,7 +716,10 @@ export class MikroTikAdapter {
 
   public async getPppProfiles(): Promise<PppProfile[]> {
     if (!this.client) throw new Error('الراوتر غير متصل');
-    const results = await this.client.writeSentence(['/ppp/profile/print']);
+    const results = await this.client.writeSentence([
+      '/ppp/profile/print',
+      '=.proplist=.id,name,local-address,remote-address,rate-limit',
+    ]);
     return results
       .filter((r) => r.type === '!re')
       .map((r) => ({
@@ -630,6 +738,24 @@ export class MikroTikAdapter {
     if (data.localAddress) cmd.push(`=local-address=${data.localAddress}`);
     if (data.remoteAddress) cmd.push(`=remote-address=${data.remoteAddress}`);
     await this.client.writeSentence(cmd);
+  }
+
+  public async updatePppProfile(idOrName: string, data: Partial<CreateProfileParams>): Promise<void> {
+    if (!this.client) throw new Error('الراوتر غير متصل');
+    try {
+      const res = await this.client.writeSentence(['/ppp/profile/print', `?name=${idOrName}`]);
+      const found = res.find((r) => r.type === '!re');
+      const targetId = found?.attributes['.id'] || idOrName;
+
+      const cmd = ['/ppp/profile/set', `=.id=${targetId}`];
+      if (data.name) cmd.push(`=name=${data.name}`);
+      if (data.rateLimit !== undefined) cmd.push(`=rate-limit=${data.rateLimit}`);
+      if (data.localAddress !== undefined) cmd.push(`=local-address=${data.localAddress}`);
+      if (data.remoteAddress !== undefined) cmd.push(`=remote-address=${data.remoteAddress}`);
+      await this.client.writeSentence(cmd);
+    } catch (e: any) {
+      throw new Error(`فشل تعديل باقة البرودباند: ${e.message}`);
+    }
   }
 
   public async deletePppProfile(idOrName: string): Promise<void> {

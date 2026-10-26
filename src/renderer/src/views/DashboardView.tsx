@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Cpu,
   HardDrive,
@@ -33,9 +33,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [loading, setLoading] = useState(false);
   const [serviceFilter, setServiceFilter] = useState<'all' | 'hotspot' | 'usermanager' | 'ppp'>('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const isFetchingRef = useRef(false);
 
   const loadDashboard = async () => {
-    if (!window.netcardAPI) return;
+    if (!window.netcardAPI || isFetchingRef.current) return;
+    isFetchingRef.current = true;
     setLoading(true);
     try {
       const res = await window.netcardAPI.getDashboardData();
@@ -46,13 +48,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       console.error('Failed to load dashboard data:', err);
     } finally {
       setLoading(false);
+      isFetchingRef.current = false;
     }
   };
 
   useEffect(() => {
     loadDashboard();
-    // Auto-refresh stats every 15 seconds
-    const interval = setInterval(loadDashboard, 15000);
+    // Auto-refresh stats every 10 seconds without overlapping requests
+    const interval = setInterval(loadDashboard, 10000);
     return () => clearInterval(interval);
   }, []);
 

@@ -1059,6 +1059,7 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
             <div className="flex-1 w-full flex items-center justify-center p-4 overflow-auto">
               <div
                 ref={canvasRef}
+                dir="ltr"
                 onMouseMove={handleMouseMoveOnCanvas}
                 style={{
                   width: `${template.cardWidthMm * previewZoom}px`,
@@ -1194,6 +1195,7 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
                       {Array.from({ length: effectiveCardsCount }).map((_, cardIdx) => (
                         <div
                           key={cardIdx}
+                          dir="ltr"
                           style={{
                             width: `${template.cardWidthMm * 3.78 * gridScale}px`,
                             height: `${template.cardHeightMm * 3.78 * gridScale}px`,

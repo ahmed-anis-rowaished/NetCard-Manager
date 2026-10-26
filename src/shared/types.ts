@@ -237,6 +237,7 @@ export interface CardBatchGenerationRequest {
   suffix: string;
   cardFormat: CardFormatType;
   umCustomer: string;
+  hotspotServer?: string;
   profileName: string;
   templateId: number;
   posId?: number;

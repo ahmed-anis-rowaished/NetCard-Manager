@@ -27,14 +27,21 @@ const netcardAPI = {
   getMikroTikStatus: () => ipcRenderer.invoke('mikrotik:getStatus'),
   getDashboardData: () => ipcRenderer.invoke('mikrotik:getDashboardData'),
   getHotspotProfiles: () => ipcRenderer.invoke('mikrotik:getHotspotProfiles'),
+  getHotspotServers: () => ipcRenderer.invoke('mikrotik:getHotspotServers'),
   createHotspotProfile: (data: any) => ipcRenderer.invoke('mikrotik:createHotspotProfile', data),
+  updateHotspotProfile: (idOrName: string, data: any) =>
+    ipcRenderer.invoke('mikrotik:updateHotspotProfile', idOrName, data),
   deleteHotspotProfile: (idOrName: string) => ipcRenderer.invoke('mikrotik:deleteHotspotProfile', idOrName),
   getUserManagerProfiles: () => ipcRenderer.invoke('mikrotik:getUserManagerProfiles'),
   createUserManagerProfile: (data: any) => ipcRenderer.invoke('mikrotik:createUserManagerProfile', data),
+  updateUserManagerProfile: (idOrName: string, data: any) =>
+    ipcRenderer.invoke('mikrotik:updateUserManagerProfile', idOrName, data),
   deleteUserManagerProfile: (idOrName: string) => ipcRenderer.invoke('mikrotik:deleteUserManagerProfile', idOrName),
   getUserManagerCustomers: () => ipcRenderer.invoke('mikrotik:getUserManagerCustomers'),
   getPppProfiles: () => ipcRenderer.invoke('mikrotik:getPppProfiles'),
   createPppProfile: (data: any) => ipcRenderer.invoke('mikrotik:createPppProfile', data),
+  updatePppProfile: (idOrName: string, data: any) =>
+    ipcRenderer.invoke('mikrotik:updatePppProfile', idOrName, data),
   deletePppProfile: (idOrName: string) => ipcRenderer.invoke('mikrotik:deletePppProfile', idOrName),
 
   // Database

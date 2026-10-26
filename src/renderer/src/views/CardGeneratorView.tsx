@@ -120,6 +120,8 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
   const [selectedProfile, setSelectedProfile] = useState<string>('');
   const [umCustomer, setUmCustomer] = useState<string>('admin');
   const [customersList, setCustomersList] = useState<string[]>(['admin']);
+  const [hotspotServers, setHotspotServers] = useState<string[]>(['all']);
+  const [selectedHotspotServer, setSelectedHotspotServer] = useState<string>('all');
   const [selectedPosId, setSelectedPosId] = useState<number | undefined>(undefined);
 
   // Generation Pattern inputs
@@ -142,10 +144,20 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
     null
   );
 
-  // Set default profile when mode or profiles change
+  // Set default profile and fetch auxiliary data when mode or profiles change
   useEffect(() => {
-    if (mode === 'hotspot' && hotspotProfiles.length > 0) {
-      setSelectedProfile(hotspotProfiles[0].name);
+    if (mode === 'hotspot') {
+      if (hotspotProfiles.length > 0) {
+        setSelectedProfile(hotspotProfiles[0].name);
+      }
+      if (window.netcardAPI) {
+        window.netcardAPI.getHotspotServers().then((srvs) => {
+          if (srvs && srvs.length > 0) {
+            setHotspotServers(srvs);
+            setSelectedHotspotServer(srvs[0]);
+          }
+        });
+      }
     } else if (mode === 'usermanager') {
       if (userManagerProfiles.length > 0) {
         setSelectedProfile(userManagerProfiles[0].name);
@@ -226,6 +238,7 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
       suffix,
       cardFormat,
       umCustomer,
+      hotspotServer: selectedHotspotServer,
       profileName: selectedProfile || 'default',
       templateId: selectedTemplateId,
       posId: selectedPosId,
@@ -447,6 +460,26 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
 
           {/* Profile, Template & POS with (+) Buttons */}
           <div className="space-y-2 pt-1 border-t border-space-border/30">
+            {/* Server Dropdown for Hotspot */}
+            {mode === 'hotspot' && (
+              <div>
+                <span className="text-[11px] text-purple-200 font-semibold block mb-1">
+                  سيرفر الهوت سبوت (Hotspot Server):
+                </span>
+                <select
+                  value={selectedHotspotServer}
+                  onChange={(e) => setSelectedHotspotServer(e.target.value)}
+                  className="w-full bg-space-darkest border border-space-border text-xs rounded-lg py-1.5 px-2.5 text-white"
+                >
+                  {hotspotServers.map((s) => (
+                    <option key={s} value={s}>
+                      {s === 'all' ? 'الكل (all - لجميع السيرفرات)' : s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {/* Customer Dropdown for User Manager */}
             {mode === 'usermanager' && (
               <div>
