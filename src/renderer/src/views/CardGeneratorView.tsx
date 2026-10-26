@@ -36,7 +36,7 @@ import {
   GenerationProgress,
   GenerationSwitches,
 } from '../../../shared/types';
-import { DEFAULT_GENERATION_SWITCHES } from '../../../shared/defaults';
+import { DEFAULT_GENERATION_SWITCHES, calculateA4GridLayout } from '../../../shared/defaults';
 
 interface CardGeneratorViewProps {
   isConnected: boolean;
@@ -85,12 +85,14 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
       if (tmpls && tmpls.length > 0) {
         setCurrentTemplatesList(tmpls);
         const exists = tmpls.find((t: CardTemplate) => t.id === selectedTemplateId);
+        const activeTmpl = exists || tmpls[0];
         if (!exists) {
-          setSelectedTemplateId(tmpls[0].id || 1);
-          const cpp = tmpls[0].cardsPerPage || 51;
-          if (inputMethod === 'pages') setCardsCount(pagesCount * cpp);
-          else setPagesCount(Math.ceil(cardsCount / cpp));
+          setSelectedTemplateId(activeTmpl.id || 1);
         }
+        const layout = calculateA4GridLayout(activeTmpl);
+        const cpp = activeTmpl.cardsPerPage || layout.cardsPerPage || 51;
+        if (inputMethod === 'pages') setCardsCount(pagesCount * cpp);
+        else setPagesCount(Math.ceil(cardsCount / cpp));
       }
     } catch (e) {
       console.error('Failed to load templates:', e);
@@ -111,7 +113,8 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
     currentTemplatesList.find((t) => t.id === selectedTemplateId) ||
     currentTemplatesList[0] ||
     templates[0];
-  const cardsPerPage = currentTemplate?.cardsPerPage || 51;
+  const currentLayout = currentTemplate ? calculateA4GridLayout(currentTemplate) : null;
+  const cardsPerPage = currentTemplate?.cardsPerPage || currentLayout?.cardsPerPage || 51;
 
   // Selected Profile
   const [selectedProfile, setSelectedProfile] = useState<string>('');
@@ -176,7 +179,8 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
   const handleTemplateChange = (tmplId: number) => {
     setSelectedTemplateId(tmplId);
     const tmpl = currentTemplatesList.find((t) => t.id === tmplId);
-    const cpp = tmpl?.cardsPerPage || 51;
+    const layout = tmpl ? calculateA4GridLayout(tmpl) : null;
+    const cpp = tmpl?.cardsPerPage || layout?.cardsPerPage || 51;
     if (inputMethod === 'pages') {
       setCardsCount(pagesCount * cpp);
     } else {
@@ -393,8 +397,8 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
             </div>
 
             <div className="text-[11px] text-purple-300 text-center pt-1 border-t border-space-border/20">
-              القالب الحالي: <strong className="text-white">{cardsPerPage} كرت</strong> في الصفحة
-              الواحدة
+              القالب المختار: <strong className="text-white">{cardsPerPage} كرت</strong> في الصفحة
+              الواحدة ({currentTemplate?.cardWidthMm || 63}×{currentTemplate?.cardHeightMm || 30} مم)
             </div>
           </div>
 
@@ -536,11 +540,15 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
                 onChange={(e) => handleTemplateChange(parseInt(e.target.value, 10))}
                 className="w-full bg-space-darkest border border-space-border text-xs rounded-lg py-1.5 px-2.5 text-white"
               >
-                {currentTemplatesList.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name} ({t.cardsPerPage} كرت)
-                  </option>
-                ))}
+                {currentTemplatesList.map((t) => {
+                  const tLayout = calculateA4GridLayout(t);
+                  const tCpp = t.cardsPerPage || tLayout.cardsPerPage;
+                  return (
+                    <option key={t.id} value={t.id}>
+                      {t.name} ({tCpp} كرت - {t.cardWidthMm}×{t.cardHeightMm} مم)
+                    </option>
+                  );
+                })}
               </select>
             </div>
 

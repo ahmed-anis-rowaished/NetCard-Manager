@@ -192,6 +192,7 @@ export interface CardTemplate {
   cardHeightMm: number;
   marginHorizontalMm: number;
   marginVerticalMm: number;
+  enableMargin?: boolean;
   hasBorder: boolean;
   borderSizePx: number;
   borderColor: string;

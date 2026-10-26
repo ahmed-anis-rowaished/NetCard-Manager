@@ -119,6 +119,7 @@ export class AppDatabase {
         cardHeightMm REAL NOT NULL DEFAULT 30,
         marginHorizontalMm REAL NOT NULL DEFAULT 4,
         marginVerticalMm REAL NOT NULL DEFAULT 4,
+        enableMargin INTEGER NOT NULL DEFAULT 1,
         hasBorder INTEGER NOT NULL DEFAULT 1,
         borderSizePx INTEGER NOT NULL DEFAULT 1,
         borderColor TEXT NOT NULL DEFAULT '#D1D5DB',
@@ -189,6 +190,10 @@ export class AppDatabase {
         value TEXT
       );
     `);
+
+    try {
+      this.db.run('ALTER TABLE templates ADD COLUMN enableMargin INTEGER DEFAULT 1');
+    } catch {}
   }
 
   private seedDefaultData(): void {
@@ -338,6 +343,7 @@ export class AppDatabase {
       }
       return {
         ...obj,
+        enableMargin: obj.enableMargin !== undefined ? Boolean(obj.enableMargin) : true,
         hasBorder: Boolean(obj.hasBorder),
         showPageNumber: Boolean(obj.showPageNumber),
         showUnits: Boolean(obj.showUnits),
@@ -359,7 +365,7 @@ export class AppDatabase {
       this.db.run(
         `UPDATE templates SET
           name = ?, cardsPerPage = ?, columnsCount = ?, cardWidthMm = ?, cardHeightMm = ?,
-          marginHorizontalMm = ?, marginVerticalMm = ?, hasBorder = ?, borderSizePx = ?, borderColor = ?,
+          marginHorizontalMm = ?, marginVerticalMm = ?, enableMargin = ?, hasBorder = ?, borderSizePx = ?, borderColor = ?,
           showPageNumber = ?, pageNumberX = ?, pageNumberY = ?, showUnits = ?, showElementDetails = ?,
           backgroundImageData = ?, hasBackgroundImage = ?, logoImageData = ?, hasLogo = ?,
           savePath = ?, linkedProfileName = ?, currency = ?, linkToPos = ?, posId = ?,
@@ -373,6 +379,7 @@ export class AppDatabase {
           tmpl.cardHeightMm,
           tmpl.marginHorizontalMm,
           tmpl.marginVerticalMm,
+          tmpl.enableMargin !== false ? 1 : 0,
           tmpl.hasBorder ? 1 : 0,
           tmpl.borderSizePx,
           tmpl.borderColor,
@@ -401,11 +408,11 @@ export class AppDatabase {
       this.db.run(
         `INSERT INTO templates
           (name, cardsPerPage, columnsCount, cardWidthMm, cardHeightMm,
-          marginHorizontalMm, marginVerticalMm, hasBorder, borderSizePx, borderColor,
+          marginHorizontalMm, marginVerticalMm, enableMargin, hasBorder, borderSizePx, borderColor,
           showPageNumber, pageNumberX, pageNumberY, showUnits, showElementDetails,
           backgroundImageData, hasBackgroundImage, logoImageData, hasLogo,
           savePath, linkedProfileName, currency, linkToPos, posId, elementsJson, updatedAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           tmpl.name,
           tmpl.cardsPerPage,
@@ -414,6 +421,7 @@ export class AppDatabase {
           tmpl.cardHeightMm,
           tmpl.marginHorizontalMm,
           tmpl.marginVerticalMm,
+          tmpl.enableMargin !== false ? 1 : 0,
           tmpl.hasBorder ? 1 : 0,
           tmpl.borderSizePx,
           tmpl.borderColor,

@@ -29,7 +29,11 @@ import {
   POSLocation,
   HotspotUserProfile,
 } from '../../../shared/types';
-import { DEFAULT_TEMPLATE, DEFAULT_ELEMENTS } from '../../../shared/defaults';
+import {
+  DEFAULT_TEMPLATE,
+  DEFAULT_ELEMENTS,
+  calculateA4GridLayout,
+} from '../../../shared/defaults';
 
 interface TemplateDesignerViewProps {
   hotspotProfiles: HotspotUserProfile[];
@@ -66,7 +70,34 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
   // Delete Confirm Modal State
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
+  // Auto-calculate A4 Grid layout toggle
+  const [autoCalculateGrid, setAutoCalculateGrid] = useState<boolean>(true);
+
   const canvasRef = useRef<HTMLDivElement>(null);
+
+  const handleDimensionChange = (updates: Partial<CardTemplate>) => {
+    setTemplate((prev) => {
+      const merged = { ...prev, ...updates };
+      if (autoCalculateGrid) {
+        const layout = calculateA4GridLayout(merged);
+        return {
+          ...merged,
+          columnsCount: layout.columns,
+          cardsPerPage: layout.cardsPerPage,
+        };
+      }
+      return merged;
+    });
+  };
+
+  const forceAutoCalculateGrid = () => {
+    const layout = calculateA4GridLayout(template);
+    setTemplate((prev) => ({
+      ...prev,
+      columnsCount: layout.columns,
+      cardsPerPage: layout.cardsPerPage,
+    }));
+  };
 
   // Load templates on mount
   useEffect(() => {
@@ -810,78 +841,153 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
 
           {/* Section: Card & Page Dimensions */}
           <div className="glass-card rounded-xl p-3 space-y-2 border border-space-border/60">
-            <h3 className="text-xs font-bold text-purple-300 flex items-center gap-1.5 border-b border-space-border/40 pb-1">
-              <Grid className="w-3.5 h-3.5" />
-              <span>أبعاد الكرت والصفحة والهوامش</span>
-            </h3>
+            <div className="flex items-center justify-between border-b border-space-border/40 pb-1">
+              <h3 className="text-xs font-bold text-purple-300 flex items-center gap-1.5">
+                <Grid className="w-3.5 h-3.5" />
+                <span>أبعاد الكرت والصفحة والهندسة (A4)</span>
+              </h3>
+              <label className="flex items-center gap-1 text-[11px] text-space-cyan cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoCalculateGrid}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setAutoCalculateGrid(checked);
+                    if (checked) forceAutoCalculateGrid();
+                  }}
+                  className="rounded border-space-border bg-space-darkest text-space-accent focus:ring-0 w-3 h-3"
+                />
+                <span>احتساب تلقائي ⚡</span>
+              </label>
+            </div>
 
+            {/* Card Dimensions & Margins */}
             <div className="grid grid-cols-4 gap-1.5 text-center">
               <div>
-                <span className="text-[10px] text-purple-400 block">عرض (ملم)</span>
-                <input
-                  type="number"
-                  value={template.cardWidthMm}
-                  onChange={(e) =>
-                    setTemplate({ ...template, cardWidthMm: parseFloat(e.target.value) || 63 })
-                  }
-                  className="w-full bg-space-darkest border border-space-border rounded text-xs py-1 text-center font-mono font-bold text-space-cyan"
-                />
+                <span className="text-[10px] text-purple-400 block">عرض الكرت</span>
+                <div className="flex items-center">
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={template.cardWidthMm}
+                    onChange={(e) =>
+                      handleDimensionChange({ cardWidthMm: parseFloat(e.target.value) || 10 })
+                    }
+                    className="w-full bg-space-darkest border border-space-border rounded text-xs py-1 text-center font-mono font-bold text-space-cyan"
+                  />
+                  <span className="text-[9px] text-purple-400 mr-0.5">مم</span>
+                </div>
               </div>
               <div>
-                <span className="text-[10px] text-purple-400 block">طول (ملم)</span>
-                <input
-                  type="number"
-                  value={template.cardHeightMm}
-                  onChange={(e) =>
-                    setTemplate({ ...template, cardHeightMm: parseFloat(e.target.value) || 30 })
-                  }
-                  className="w-full bg-space-darkest border border-space-border rounded text-xs py-1 text-center font-mono font-bold text-space-cyan"
-                />
+                <span className="text-[10px] text-purple-400 block">طول الكرت</span>
+                <div className="flex items-center">
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={template.cardHeightMm}
+                    onChange={(e) =>
+                      handleDimensionChange({ cardHeightMm: parseFloat(e.target.value) || 10 })
+                    }
+                    className="w-full bg-space-darkest border border-space-border rounded text-xs py-1 text-center font-mono font-bold text-space-cyan"
+                  />
+                  <span className="text-[9px] text-purple-400 mr-0.5">مم</span>
+                </div>
               </div>
               <div>
-                <span className="text-[10px] text-purple-400 block">كروت/صفحة</span>
-                <input
-                  type="number"
-                  value={template.cardsPerPage}
-                  onChange={(e) =>
-                    setTemplate({ ...template, cardsPerPage: parseInt(e.target.value, 10) || 51 })
-                  }
-                  className="w-full bg-space-darkest border border-space-border rounded text-xs py-1 text-center font-mono font-bold text-space-pink"
-                />
+                <span className="text-[10px] text-purple-400 block">هامش أفقي</span>
+                <div className="flex items-center">
+                  <input
+                    type="number"
+                    step="0.5"
+                    disabled={template.enableMargin === false}
+                    value={template.marginHorizontalMm ?? 4}
+                    onChange={(e) =>
+                      handleDimensionChange({ marginHorizontalMm: parseFloat(e.target.value) || 0 })
+                    }
+                    className="w-full bg-space-darkest border border-space-border rounded text-xs py-1 text-center font-mono font-bold text-purple-200 disabled:opacity-40"
+                  />
+                  <span className="text-[9px] text-purple-400 mr-0.5">مم</span>
+                </div>
               </div>
               <div>
-                <span className="text-[10px] text-purple-400 block">الأعمدة</span>
+                <span className="text-[10px] text-purple-400 block">هامش رأسي</span>
+                <div className="flex items-center">
+                  <input
+                    type="number"
+                    step="0.5"
+                    disabled={template.enableMargin === false}
+                    value={template.marginVerticalMm ?? 4}
+                    onChange={(e) =>
+                      handleDimensionChange({ marginVerticalMm: parseFloat(e.target.value) || 0 })
+                    }
+                    className="w-full bg-space-darkest border border-space-border rounded text-xs py-1 text-center font-mono font-bold text-purple-200 disabled:opacity-40"
+                  />
+                  <span className="text-[9px] text-purple-400 mr-0.5">مم</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Calculated Grid Results: Columns & CardsPerPage */}
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <div className="bg-space-darkest/80 p-1.5 rounded-lg border border-space-border/60 text-center">
+                <span className="text-[10px] text-purple-400 block">الأعمدة في الصفحة:</span>
                 <input
                   type="number"
+                  min="1"
                   value={template.columnsCount}
                   onChange={(e) =>
-                    setTemplate({ ...template, columnsCount: parseInt(e.target.value, 10) || 3 })
+                    setTemplate({ ...template, columnsCount: parseInt(e.target.value, 10) || 1 })
                   }
-                  className="w-full bg-space-darkest border border-space-border rounded text-xs py-1 text-center font-mono font-bold text-space-cyan"
+                  className="w-full bg-transparent text-center font-mono font-bold text-sm text-space-cyan focus:outline-none"
+                />
+              </div>
+
+              <div className="bg-space-darkest/80 p-1.5 rounded-lg border border-space-border/60 text-center">
+                <span className="text-[10px] text-purple-400 block">كروت/صفحة (إجمالي):</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={template.cardsPerPage}
+                  onChange={(e) =>
+                    setTemplate({ ...template, cardsPerPage: parseInt(e.target.value, 10) || 1 })
+                  }
+                  className="w-full bg-transparent text-center font-mono font-bold text-sm text-space-pink focus:outline-none"
                 />
               </div>
             </div>
 
-            {/* Borders and Margins */}
-            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-space-border/30">
-              <label className="flex items-center gap-1.5 text-xs text-purple-200 cursor-pointer">
+            {/* Toggles: Margin, Border, PageNumber */}
+            <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-space-border/30">
+              <label className="flex items-center gap-1 text-[11px] text-purple-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={template.enableMargin !== false}
+                  onChange={(e) =>
+                    handleDimensionChange({ enableMargin: e.target.checked })
+                  }
+                  className="rounded border-space-border bg-space-darkest text-space-accent focus:ring-0"
+                />
+                <span>هوامش كروت</span>
+              </label>
+
+              <label className="flex items-center gap-1 text-[11px] text-purple-200 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={template.hasBorder}
                   onChange={(e) => setTemplate({ ...template, hasBorder: e.target.checked })}
                   className="rounded border-space-border bg-space-darkest text-space-accent focus:ring-0"
                 />
-                <span>إطار الكرت (Border)</span>
+                <span>إطار الكرت</span>
               </label>
 
-              <label className="flex items-center gap-1.5 text-xs text-purple-200 cursor-pointer">
+              <label className="flex items-center gap-1 text-[11px] text-purple-200 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={template.showPageNumber}
                   onChange={(e) => setTemplate({ ...template, showPageNumber: e.target.checked })}
                   className="rounded border-space-border bg-space-darkest text-space-accent focus:ring-0"
                 />
-                <span>ترقيم الصفحات</span>
+                <span>ترقيم صفحات</span>
               </label>
             </div>
           </div>
@@ -1060,100 +1166,109 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
                 style={{
                   width: `${210 * 3.78 * gridScale}px`,
                   minHeight: `${297 * 3.78 * gridScale}px`,
-                  padding: `${8 * 3.78 * gridScale}px`,
+                  padding: `${calculateA4GridLayout(template).marginTopMm * 3.78 * gridScale}px ${calculateA4GridLayout(template).marginLeftMm * 3.78 * gridScale}px`,
                 }}
                 className="bg-white rounded shadow-2xl relative border border-slate-300 flex flex-col justify-between"
               >
                 {/* Cards Grid */}
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: `repeat(${template.columnsCount}, minmax(0, 1fr))`,
-                    columnGap: `${template.marginHorizontalMm * 2.5 * gridScale}px`,
-                    rowGap: `${template.marginVerticalMm * 2.5 * gridScale}px`,
-                  }}
-                >
-                  {Array.from({ length: template.cardsPerPage }).map((_, cardIdx) => (
+                {(() => {
+                  const layout = calculateA4GridLayout(template);
+                  const effectiveCardsCount = template.cardsPerPage || layout.cardsPerPage;
+                  const effectiveCols = template.columnsCount || layout.columns;
+
+                  return (
                     <div
-                      key={cardIdx}
                       style={{
-                        height: `${template.cardHeightMm * 2.5 * gridScale}px`,
-                        borderWidth: template.hasBorder ? `${template.borderSizePx || 1}px` : '0px',
-                        borderColor: template.hasBorder ? template.borderColor : 'transparent',
-                        backgroundImage:
-                          template.hasBackgroundImage && template.backgroundImageData
-                            ? `url(${template.backgroundImageData})`
-                            : undefined,
-                        backgroundSize: 'cover',
-                        backgroundPosition: 'center',
+                        display: 'grid',
+                        gridTemplateColumns: `repeat(${effectiveCols}, minmax(0, 1fr))`,
+                        columnGap: `${layout.gapX * 3.78 * gridScale}px`,
+                        rowGap: `${layout.gapY * 3.78 * gridScale}px`,
                       }}
-                      className="bg-white rounded-sm relative overflow-hidden border border-slate-200"
                     >
-                      {/* Mini Logo */}
-                      {template.hasLogo && template.logoImageData && (
-                        <img
-                          src={template.logoImageData}
-                          alt="Logo"
-                          className="absolute pointer-events-none"
+                      {Array.from({ length: effectiveCardsCount }).map((_, cardIdx) => (
+                        <div
+                          key={cardIdx}
                           style={{
-                            left: `${2 * 2.5 * gridScale}px`,
-                            top: `${2 * 2.5 * gridScale}px`,
-                            width: `${7 * 2.5 * gridScale}px`,
-                            height: `${7 * 2.5 * gridScale}px`,
-                            objectFit: 'contain',
+                            width: `${template.cardWidthMm * 3.78 * gridScale}px`,
+                            height: `${template.cardHeightMm * 3.78 * gridScale}px`,
+                            borderWidth: template.hasBorder ? `${template.borderSizePx || 1}px` : '0px',
+                            borderColor: template.hasBorder ? template.borderColor : 'transparent',
+                            backgroundImage:
+                              template.hasBackgroundImage && template.backgroundImageData
+                                ? `url(${template.backgroundImageData})`
+                                : undefined,
+                            backgroundSize: '100% 100%',
+                            backgroundPosition: 'center',
                           }}
-                        />
-                      )}
-
-                      {/* Render Enabled Elements scaled */}
-                      {template.elements.map((el) => {
-                        if (!el.enabled) return null;
-                        const leftPx = el.xMm * 2.5 * gridScale;
-                        const topPx = el.yMm * 2.5 * gridScale;
-
-                        if (el.id === 'barcode') {
-                          return (
-                            <div
-                              key={el.id}
+                          className="bg-white rounded-sm relative overflow-hidden border border-slate-200"
+                        >
+                          {/* Mini Logo */}
+                          {template.hasLogo && template.logoImageData && (
+                            <img
+                              src={template.logoImageData}
+                              alt="Logo"
+                              className="absolute pointer-events-none"
                               style={{
-                                left: `${leftPx}px`,
-                                top: `${topPx}px`,
-                                width: `${(el.barcodeWidthMm || 22) * 2.5 * gridScale}px`,
-                                height: `${(el.barcodeHeightMm || 8) * 2.5 * gridScale}px`,
+                                left: `${2 * 2.5 * gridScale}px`,
+                                top: `${2 * 2.5 * gridScale}px`,
+                                width: `${7 * 2.5 * gridScale}px`,
+                                height: `${7 * 2.5 * gridScale}px`,
+                                objectFit: 'contain',
                               }}
-                              className="absolute flex items-center justify-center bg-white border border-slate-200"
-                            >
-                              <div className="w-full h-full flex items-center justify-center gap-0.5 px-0.5">
-                                <span className="w-0.5 h-full bg-black"></span>
-                                <span className="w-1 h-full bg-black"></span>
-                                <span className="w-0.5 h-full bg-black"></span>
-                                <span className="w-1 h-full bg-black"></span>
-                              </div>
-                            </div>
-                          );
-                        }
+                            />
+                          )}
 
-                        return (
-                          <div
-                            key={el.id}
-                            style={{
-                              left: `${leftPx}px`,
-                              top: `${topPx}px`,
-                              fontFamily: el.fontFamily,
-                              fontSize: `${Math.max(5, el.fontSizePt * 0.9 * gridScale)}px`,
-                              color: el.fontColor,
-                              fontWeight: el.isBold ? 'bold' : 'normal',
-                              fontStyle: el.isItalic ? 'italic' : 'normal',
-                            }}
-                            className="absolute leading-none whitespace-nowrap"
-                          >
-                            {getSampleTextForElement(el)}
-                          </div>
-                        );
-                      })}
+                          {/* Render Enabled Elements scaled */}
+                          {template.elements.map((el) => {
+                            if (!el.enabled) return null;
+                            const leftPx = el.xMm * 2.5 * gridScale;
+                            const topPx = el.yMm * 2.5 * gridScale;
+
+                            if (el.id === 'barcode') {
+                              return (
+                                <div
+                                  key={el.id}
+                                  style={{
+                                    left: `${leftPx}px`,
+                                    top: `${topPx}px`,
+                                    width: `${(el.barcodeWidthMm || 22) * 2.5 * gridScale}px`,
+                                    height: `${(el.barcodeHeightMm || 8) * 2.5 * gridScale}px`,
+                                  }}
+                                  className="absolute flex items-center justify-center bg-white border border-slate-200"
+                                >
+                                  <div className="w-full h-full flex items-center justify-center gap-0.5 px-0.5">
+                                    <span className="w-0.5 h-full bg-black"></span>
+                                    <span className="w-1 h-full bg-black"></span>
+                                    <span className="w-0.5 h-full bg-black"></span>
+                                    <span className="w-1 h-full bg-black"></span>
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <div
+                                key={el.id}
+                                style={{
+                                  left: `${leftPx}px`,
+                                  top: `${topPx}px`,
+                                  fontFamily: el.fontFamily,
+                                  fontSize: `${Math.max(5, el.fontSizePt * 0.9 * gridScale)}px`,
+                                  color: el.fontColor,
+                                  fontWeight: el.isBold ? 'bold' : 'normal',
+                                  fontStyle: el.isItalic ? 'italic' : 'normal',
+                                }}
+                                className="absolute leading-none whitespace-nowrap"
+                              >
+                                {getSampleTextForElement(el)}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  );
+                })()}
 
                 {/* Page Numbering */}
                 {template.showPageNumber && (
@@ -1168,16 +1283,18 @@ export const TemplateDesignerView: React.FC<TemplateDesignerViewProps> = ({
           {/* Bottom Card Geometry Badge */}
           <div className="w-full flex items-center justify-between text-xs text-purple-300 bg-space-darkest/60 px-4 py-2 rounded-xl border border-space-border/40">
             <span>
-              أبعاد الكرت الحقيقي: <strong className="text-white">{template.cardWidthMm} مم</strong>{' '}
-              × <strong className="text-white">{template.cardHeightMm} مم</strong>
+              أبعاد الكرت:{' '}
+              <strong className="text-white">
+                {template.cardWidthMm}×{template.cardHeightMm} ملم
+              </strong>
             </span>
             <span>
-              توزيع الصفحة:{' '}
+              التوزيع التلقائي على ورق A4:{' '}
               <strong className="text-space-cyan">{template.columnsCount} أعمدة</strong> ×{' '}
               <strong className="text-space-cyan">
-                {Math.ceil(template.cardsPerPage / template.columnsCount)} صفوف
+                {Math.max(1, Math.ceil(template.cardsPerPage / (template.columnsCount || 1)))} صفوف
               </strong>{' '}
-              (= <strong className="text-space-pink">{template.cardsPerPage} كرت بالصفحة</strong>)
+              = (<strong className="text-space-pink font-bold">{template.cardsPerPage}</strong> كرت في الصفحة الواحدة)
             </span>
             <span className="font-mono text-[11px] text-purple-400">ورق قياسي A4 (210×297 مم)</span>
           </div>

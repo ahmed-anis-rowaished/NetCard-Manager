@@ -264,7 +264,9 @@ export function setupIpcHandlers(
       // 3. Push to Router (unless Offline Mode)
       if (!req.switches.offlineMode) {
         if (!adapter.isConnected()) {
-          throw new Error('الراوتر غير متصل! يرجى الاتصال أولاً أو تفعيل "توليد كروت بدون إضافة" (Offline)');
+          throw new Error(
+            'الراوتر غير متصل! يرجى الاتصال بالراوتر أولاً من شاشة تسجيل الدخول، أو تفعيل وضع "توليد كروت بدون إضافة للراوتر" (Offline) لتوليد وطباعة الكروت بدون الاتصال بالجهاز.'
+          );
         }
 
         notifyProgress({
@@ -288,7 +290,7 @@ export function setupIpcHandlers(
             },
           });
           if (req.switches.transactionSafety && res.failed > 0 && res.added === 0) {
-            throw new Error(`فشلت إضافة الكروت في الراوتر: ${res.errors[0] || 'خطأ غير معروف'}`);
+            throw new Error(`فشلت إضافة الكروت في الهوت سبوت: ${res.errors[0] || 'خطأ في استجابة الراوتر'}`);
           }
         } else if (req.mode === 'usermanager') {
           const res = await adapter.addUserManagerUsers(cards, {
@@ -306,7 +308,7 @@ export function setupIpcHandlers(
             },
           });
           if (req.switches.transactionSafety && res.failed > 0 && res.added === 0) {
-            throw new Error(`فشلت إضافة الكروت في اليوزر مانجر: ${res.errors[0] || 'خطأ غير معروف'}`);
+            throw new Error(`فشلت إضافة الكروت في اليوزر مانجر: ${res.errors[0] || 'خطأ في استجابة الراوتر'}`);
           }
         } else if (req.mode === 'broadband') {
           const res = await adapter.addPppSecrets(cards, {
@@ -321,7 +323,7 @@ export function setupIpcHandlers(
             },
           });
           if (req.switches.transactionSafety && res.failed > 0 && res.added === 0) {
-            throw new Error(`فشلت إضافة اشتراكات البرودباند: ${res.errors[0] || 'خطأ غير معروف'}`);
+            throw new Error(`فشلت إضافة اشتراكات البرودباند: ${res.errors[0] || 'خطأ في استجابة الراوتر'}`);
           }
         }
       }
@@ -338,9 +340,7 @@ export function setupIpcHandlers(
           'NetCard_Prints'
         );
       }
-      if (!fs.existsSync(targetDir)) {
-        fs.mkdirSync(targetDir, { recursive: true });
-      }
+      fs.mkdirSync(targetDir, { recursive: true });
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const baseFilename = `NetCards_${req.mode}_${cards[0].batchId}_${timestamp}`;
@@ -360,6 +360,7 @@ export function setupIpcHandlers(
         if (!saveDialogRes.canceled && saveDialogRes.filePath) {
           pdfPath = saveDialogRes.filePath;
           targetDir = path.dirname(pdfPath);
+          fs.mkdirSync(targetDir, { recursive: true });
         }
       }
 
@@ -372,18 +373,21 @@ export function setupIpcHandlers(
           message: 'جاري تصيير شبكة الكروت وملف الطباعة بدقة 300 DPI مع النصوص العربية...',
         });
 
+        fs.mkdirSync(path.dirname(pdfPath), { recursive: true });
         await PdfGenerator.generateCardGridPdf(cards, template, pdfPath);
       }
 
       // 7. Generate Excel if enabled
       if (req.switches.exportExcel) {
         excelPath = path.join(targetDir, `${baseFilename}.xlsx`);
+        fs.mkdirSync(path.dirname(excelPath), { recursive: true });
         await ExcelExporter.exportCardsToExcel(cards, excelPath, `دفعة ${cards[0].batchId}`);
       }
 
       // 8. Generate RSC Script if enabled
       if (req.switches.exportRscScript) {
         rscPath = path.join(targetDir, `${baseFilename}.rsc`);
+        fs.mkdirSync(path.dirname(rscPath), { recursive: true });
         const rscContent = adapter.generateRscScript(
           cards,
           req.mode,
@@ -399,6 +403,7 @@ export function setupIpcHandlers(
       // 9. Generate TXT Copy if enabled
       if (req.switches.saveTxtCopy) {
         txtPath = path.join(targetDir, `${baseFilename}.txt`);
+        fs.mkdirSync(path.dirname(txtPath), { recursive: true });
         const txtLines = cards.map(
           (c) =>
             `${c.serial}\t${c.username}\t${c.password || ''}\t${c.profile}\t${c.price} ${c.currency}`
@@ -408,7 +413,7 @@ export function setupIpcHandlers(
 
       // 10. Open File after add if enabled
       if (req.switches.openFileAfterAdd && pdfPath && fs.existsSync(pdfPath)) {
-        shell.openPath(pdfPath);
+        await shell.openPath(pdfPath);
       }
 
       notifyProgress({

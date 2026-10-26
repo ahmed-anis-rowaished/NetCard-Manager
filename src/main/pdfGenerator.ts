@@ -4,6 +4,7 @@ import path from 'path';
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
 import { CardTemplate, GeneratedCard, TemplateElementConfig } from '../shared/types';
+import { calculateA4GridLayout } from '../shared/defaults';
 import { BarcodeGenerator } from './barcodeGenerator';
 
 export class PdfGenerator {
@@ -59,18 +60,22 @@ export class PdfGenerator {
    * Generates production-grade A4 PDF completely OFFLINE without external web font dependencies.
    * Uses Chromium's native text shaper with system Arabic fonts (Cairo, Tajawal, Segoe UI, Tahoma, Arial)
    * for zero latency and pristine connected RTL typography.
+   * Loads HTML via temporary file and CSS classes to eliminate Chromium URL size limits.
    */
   private static async generateViaChromium(
     cards: GeneratedCard[],
     template: CardTemplate,
     outputPath: string
   ): Promise<string> {
-    const cardsPerPage = template.cardsPerPage || 51;
-    const columns = template.columnsCount || 3;
+    const layout = calculateA4GridLayout(template);
+    const cardsPerPage = template.cardsPerPage || layout.cardsPerPage;
+    const columns = template.columnsCount || layout.columns;
     const cardW = template.cardWidthMm || 63;
     const cardH = template.cardHeightMm || 30;
-    const marginH = template.marginHorizontalMm || 4;
-    const marginV = template.marginVerticalMm || 4;
+    const gapX = layout.gapX;
+    const gapY = layout.gapY;
+    const marginLeft = layout.marginLeftMm;
+    const marginTop = layout.marginTopMm;
 
     const totalPages = Math.ceil(cards.length / cardsPerPage);
 
@@ -127,8 +132,8 @@ export class PdfGenerator {
         const col = i % columns;
         const row = Math.floor(i / columns);
 
-        const cardLeft = marginH + col * cardW;
-        const cardTop = marginV + row * cardH;
+        const cardLeft = marginLeft + col * (cardW + gapX);
+        const cardTop = marginTop + row * (cardH + gapY);
 
         let elementsHtml = '';
 
@@ -216,16 +221,8 @@ export class PdfGenerator {
           ? `border: ${template.borderSizePx || 1}px solid ${template.borderColor || '#D1D5DB'};`
           : '';
 
-        const bgImageStyle = resolvedBgData
-          ? `background-image: url('${resolvedBgData}'); background-size: cover; background-position: center;`
-          : 'background-color: #ffffff;';
-
-        const logoHtml = resolvedLogoData
-          ? `<img src="${resolvedLogoData}" style="position: absolute; left: 2mm; top: 2mm; width: 10mm; height: 10mm; object-fit: contain;" />`
-          : '';
-
         cardsHtml += `
-          <div style="
+          <div class="card-item card-bg" style="
             position: absolute;
             left: ${cardLeft}mm;
             top: ${cardTop}mm;
@@ -234,9 +231,8 @@ export class PdfGenerator {
             box-sizing: border-box;
             overflow: hidden;
             ${borderStyle}
-            ${bgImageStyle}
           ">
-            ${logoHtml}
+            ${resolvedLogoData ? '<div class="card-logo"></div>' : ''}
             ${elementsHtml}
           </div>
         `;
@@ -270,6 +266,14 @@ export class PdfGenerator {
       `;
     }
 
+    const bgCssRule = resolvedBgData
+      ? `.card-bg { background-image: url('${resolvedBgData}'); background-size: 100% 100%; background-repeat: no-repeat; background-position: center; }`
+      : `.card-bg { background-color: #ffffff; }`;
+
+    const logoCssRule = resolvedLogoData
+      ? `.card-logo { position: absolute; left: 2mm; top: 2mm; width: 10mm; height: 10mm; background-image: url('${resolvedLogoData}'); background-size: contain; background-repeat: no-repeat; background-position: center; z-index: 5; }`
+      : '';
+
     const fullHtml = `
       <!DOCTYPE html>
       <html lang="ar" dir="rtl">
@@ -291,6 +295,12 @@ export class PdfGenerator {
             * {
               box-sizing: border-box;
             }
+            .card-item {
+              box-sizing: border-box;
+              overflow: hidden;
+            }
+            ${bgCssRule}
+            ${logoCssRule}
           </style>
         </head>
         <body>
@@ -298,6 +308,12 @@ export class PdfGenerator {
         </body>
       </html>
     `;
+
+    const tempHtmlPath = path.join(
+      app.getPath('temp'),
+      `netcard_print_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.html`
+    );
+    await fs.promises.writeFile(tempHtmlPath, fullHtml, 'utf-8');
 
     return new Promise((resolve, reject) => {
       const win = new BrowserWindow({
@@ -310,9 +326,38 @@ export class PdfGenerator {
         },
       });
 
-      win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(fullHtml)}`);
+      let finished = false;
+
+      const cleanup = async () => {
+        try {
+          if (!win.isDestroyed()) win.close();
+        } catch {}
+        try {
+          if (fs.existsSync(tempHtmlPath)) {
+            await fs.promises.unlink(tempHtmlPath).catch(() => {});
+          }
+        } catch {}
+      };
+
+      const timer = setTimeout(async () => {
+        if (!finished) {
+          finished = true;
+          await cleanup();
+          reject(new Error('انتهت مهلة توليد ملف PDF (تجاوز 45 ثانية).'));
+        }
+      }, 45000);
+
+      win.webContents.on('did-fail-load', async (_event, errorCode, errorDescription) => {
+        if (!finished) {
+          finished = true;
+          clearTimeout(timer);
+          await cleanup();
+          reject(new Error(`فشل تحميل قالب الطباعة: ${errorDescription} (${errorCode})`));
+        }
+      });
 
       win.webContents.on('did-finish-load', async () => {
+        if (finished) return;
         try {
           const pdfBuffer = await win.webContents.printToPDF({
             pageSize: 'A4',
@@ -325,18 +370,31 @@ export class PdfGenerator {
             },
           });
 
+          const outDir = path.dirname(outputPath);
+          if (!fs.existsSync(outDir)) {
+            fs.mkdirSync(outDir, { recursive: true });
+          }
+
           fs.writeFileSync(outputPath, pdfBuffer);
-          win.close();
+          finished = true;
+          clearTimeout(timer);
+          await cleanup();
           resolve(outputPath);
         } catch (err) {
-          win.close();
+          finished = true;
+          clearTimeout(timer);
+          await cleanup();
           reject(err);
         }
       });
 
-      win.webContents.on('did-fail-load', (_, __, errorDescription) => {
-        win.close();
-        reject(new Error(errorDescription));
+      win.loadFile(tempHtmlPath).catch(async (err) => {
+        if (!finished) {
+          finished = true;
+          clearTimeout(timer);
+          await cleanup();
+          reject(err);
+        }
       });
     });
   }
@@ -355,12 +413,16 @@ export class PdfGenerator {
       format: 'a4',
     });
 
-    const cardsPerPage = template.cardsPerPage || 51;
-    const columns = template.columnsCount || 3;
+    const layout = calculateA4GridLayout(template);
+    const cardsPerPage = template.cardsPerPage || layout.cardsPerPage;
+    const columns = template.columnsCount || layout.columns;
     const cardW = template.cardWidthMm || 63;
     const cardH = template.cardHeightMm || 30;
-    const marginH = template.marginHorizontalMm || 4;
-    const marginV = template.marginVerticalMm || 4;
+    const gapX = layout.gapX;
+    const gapY = layout.gapY;
+    const marginLeft = layout.marginLeftMm;
+    const marginTop = layout.marginTopMm;
+
     const totalPages = Math.ceil(cards.length / cardsPerPage);
 
     for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
@@ -373,8 +435,8 @@ export class PdfGenerator {
         const col = i % columns;
         const row = Math.floor(i / columns);
 
-        const cardX = marginH + col * cardW;
-        const cardY = marginV + row * cardH;
+        const cardX = marginLeft + col * (cardW + gapX);
+        const cardY = marginTop + row * (cardH + gapY);
 
         if (template.hasBorder) {
           doc.rect(cardX, cardY, cardW, cardH);
@@ -389,6 +451,11 @@ export class PdfGenerator {
           }
         }
       }
+    }
+
+    const outDir = path.dirname(outputPath);
+    if (!fs.existsSync(outDir)) {
+      fs.mkdirSync(outDir, { recursive: true });
     }
 
     const pdfArrayBuffer = doc.output('arraybuffer');

@@ -143,6 +143,61 @@ export const DEFAULT_ELEMENTS: TemplateElementConfig[] = [
   },
 ];
 
+export interface A4GridLayoutResult {
+  columns: number;
+  rows: number;
+  cardsPerPage: number;
+  printableWidthMm: number;
+  printableHeightMm: number;
+  gapX: number;
+  gapY: number;
+  marginLeftMm: number;
+  marginTopMm: number;
+}
+
+/**
+ * Geometric calculation of cards layout on standard A4 paper (210mm x 297mm).
+ * Applies 3mm safe margins on all 4 sides (204mm x 291mm printable).
+ */
+export function calculateA4GridLayout(template: {
+  cardWidthMm: number;
+  cardHeightMm: number;
+  marginHorizontalMm?: number;
+  marginVerticalMm?: number;
+  enableMargin?: boolean;
+}): A4GridLayoutResult {
+  const printableW = 204; // 210mm - 6mm page margins
+  const printableH = 291; // 297mm - 6mm page margins
+
+  const cardW = Math.max(10, template.cardWidthMm || 63);
+  const cardH = Math.max(10, template.cardHeightMm || 30);
+
+  const isMarginEnabled = template.enableMargin !== false;
+  const gapX = isMarginEnabled ? (template.marginHorizontalMm ?? 0) : 0;
+  const gapY = isMarginEnabled ? (template.marginVerticalMm ?? 0) : 0;
+
+  const columns = Math.max(1, Math.floor((printableW + gapX) / (cardW + gapX)));
+  const rows = Math.max(1, Math.floor((printableH + gapY) / (cardH + gapY)));
+  const cardsPerPage = columns * rows;
+
+  const usedW = columns * cardW + Math.max(0, columns - 1) * gapX;
+  const usedH = rows * cardH + Math.max(0, rows - 1) * gapY;
+  const marginLeftMm = Math.max(3, (210 - usedW) / 2);
+  const marginTopMm = Math.max(3, (297 - usedH) / 2);
+
+  return {
+    columns,
+    rows,
+    cardsPerPage,
+    printableWidthMm: printableW,
+    printableHeightMm: printableH,
+    gapX,
+    gapY,
+    marginLeftMm,
+    marginTopMm,
+  };
+}
+
 export const DEFAULT_TEMPLATE: CardTemplate = {
   id: 1,
   name: '200RY - القياسي (51 كرت)',
@@ -152,6 +207,7 @@ export const DEFAULT_TEMPLATE: CardTemplate = {
   cardHeightMm: 30,
   marginHorizontalMm: 4,
   marginVerticalMm: 4,
+  enableMargin: true,
   hasBorder: true,
   borderSizePx: 1,
   borderColor: '#D1D5DB',
