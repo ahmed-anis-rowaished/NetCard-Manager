@@ -16,6 +16,7 @@ export interface ConnectionConfig {
   turboMode: boolean;
   saveUsername: boolean;
   savePassword: boolean;
+  savedDeviceId?: number;
 }
 
 export interface SavedDevice {

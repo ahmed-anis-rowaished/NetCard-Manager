@@ -77,6 +77,7 @@ export class AppDatabase {
     }
     this.createTables(); // Ensure all tables exist
     this.clearDemoData(); // Purge any legacy demo/mock data
+    this.deduplicateSavedDevices(); // Clean up any duplicate saved devices
   }
 
   private saveToFile(): void {
@@ -239,6 +240,25 @@ export class AppDatabase {
     }
   }
 
+  public deduplicateSavedDevices(): void {
+    if (!this.db) return;
+    try {
+      this.db.run(`
+        DELETE FROM saved_devices 
+        WHERE id NOT IN (
+          SELECT MAX(id) 
+          FROM saved_devices 
+          GROUP BY 
+            connectionType,
+            CASE WHEN connectionType = 'ip' THEN ip ELSE domain END
+        )
+      `);
+      this.saveToFile();
+    } catch (e) {
+      console.warn('[Database] deduplicateSavedDevices error:', e);
+    }
+  }
+
   // --- Saved Devices ---
   public getSavedDevices(): SavedDevice[] {
     if (!this.db) return [];
@@ -265,7 +285,56 @@ export class AppDatabase {
     const encrypted = encryptPassword(dev.passwordEncrypted);
     const now = new Date().toISOString();
 
-    if (dev.id) {
+    let targetId: number | undefined = dev.id;
+
+    // If ID not provided, check if router is already registered by IP or Domain
+    if (!targetId) {
+      if (dev.connectionType === 'ip' && dev.ip) {
+        // Try match by IP and port first
+        let found = this.db.exec(
+          'SELECT id, name, comment FROM saved_devices WHERE connectionType = ? AND ip = ? AND port = ? LIMIT 1',
+          ['ip', dev.ip, dev.port || 8728]
+        );
+        // Fallback match by IP alone
+        if (!found.length || !found[0].values.length) {
+          found = this.db.exec(
+            'SELECT id, name, comment FROM saved_devices WHERE connectionType = ? AND ip = ? LIMIT 1',
+            ['ip', dev.ip]
+          );
+        }
+        if (found.length > 0 && found[0].values && found[0].values.length > 0) {
+          targetId = found[0].values[0][0] as number;
+          const existingName = found[0].values[0][1] as string;
+          const existingComment = found[0].values[0][2] as string;
+          if (existingName && dev.name === dev.ip && (!dev.comment || dev.comment.trim() === '')) {
+            dev.name = existingName;
+            dev.comment = existingComment || dev.comment;
+          }
+        }
+      } else if (dev.connectionType === 'domain' && dev.domain) {
+        let found = this.db.exec(
+          'SELECT id, name, comment FROM saved_devices WHERE connectionType = ? AND domain = ? AND port = ? LIMIT 1',
+          ['domain', dev.domain, dev.port || 8728]
+        );
+        if (!found.length || !found[0].values.length) {
+          found = this.db.exec(
+            'SELECT id, name, comment FROM saved_devices WHERE connectionType = ? AND domain = ? LIMIT 1',
+            ['domain', dev.domain]
+          );
+        }
+        if (found.length > 0 && found[0].values && found[0].values.length > 0) {
+          targetId = found[0].values[0][0] as number;
+          const existingName = found[0].values[0][1] as string;
+          const existingComment = found[0].values[0][2] as string;
+          if (existingName && dev.name === dev.domain && (!dev.comment || dev.comment.trim() === '')) {
+            dev.name = existingName;
+            dev.comment = existingComment || dev.comment;
+          }
+        }
+      }
+    }
+
+    if (targetId) {
       this.db.run(
         `UPDATE saved_devices SET 
           name = ?, ip = ?, domain = ?, connectionType = ?, username = ?, 
@@ -279,17 +348,17 @@ export class AppDatabase {
           dev.connectionType,
           dev.username,
           encrypted,
-          dev.port,
+          dev.port || 8728,
           dev.useSsl ? 1 : 0,
           dev.comment || '',
           dev.fastLogin ? 1 : 0,
           dev.turboMode ? 1 : 0,
           dev.lastConnected || now,
-          dev.id,
+          targetId,
         ]
       );
       this.saveToFile();
-      return dev.id;
+      return targetId;
     } else {
       this.db.run(
         `INSERT INTO saved_devices 
@@ -302,7 +371,7 @@ export class AppDatabase {
           dev.connectionType,
           dev.username,
           encrypted,
-          dev.port,
+          dev.port || 8728,
           dev.useSsl ? 1 : 0,
           dev.comment || '',
           dev.fastLogin ? 1 : 0,

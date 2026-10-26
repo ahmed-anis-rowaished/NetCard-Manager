@@ -93,11 +93,21 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, isConnecte
   const handleDeviceRowClick = (dev: MndpDevice) => {
     const parts = dev.ip.split('.');
     if (parts.length === 4) {
+      const existing = savedDevices.find((s) => s.connectionType === 'ip' && s.ip === dev.ip);
       setConfig((prev) => ({
         ...prev,
+        savedDeviceId: existing?.id,
         type: 'ip',
         octets: parts as [string, string, string, string],
         comment: dev.identity ? `${dev.identity} (${dev.boardName})` : prev.comment,
+        ...(existing
+          ? {
+              username: existing.username,
+              password: existing.passwordEncrypted || '',
+              port: existing.port,
+              useSsl: existing.useSsl,
+            }
+          : {}),
       }));
     }
     setSuccessMsg(`تم تحديد الجهاز: ${dev.identity || dev.ip}`);
@@ -110,6 +120,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, isConnecte
       if (parts.length === 4) {
         setConfig((prev) => ({
           ...prev,
+          savedDeviceId: dev.id,
           type: 'ip',
           octets: parts as [string, string, string, string],
           username: dev.username,
@@ -124,6 +135,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, isConnecte
     } else if (dev.domain) {
       setConfig((prev) => ({
         ...prev,
+        savedDeviceId: dev.id,
         type: 'domain',
         domain: dev.domain,
         username: dev.username,

@@ -56,18 +56,25 @@ export function setupIpcHandlers(
   ipcMain.handle('mikrotik:connect', async (_, config: ConnectionConfig) => {
     try {
       const info = await adapter.connectAndDetect(config);
-      // Auto-save device if requested
+      // Auto-save device if requested (updates existing router record if already saved)
       if (config.saveUsername || config.savePassword) {
+        const ipStr = config.type === 'ip' ? config.octets.join('.') : '';
+        const routerName =
+          config.comment?.trim() ||
+          info?.identity ||
+          (config.type === 'ip' ? ipStr : config.domain);
+
         db.saveDevice({
-          name: config.comment || (config.type === 'ip' ? config.octets.join('.') : config.domain),
-          ip: config.type === 'ip' ? config.octets.join('.') : '',
+          id: config.savedDeviceId,
+          name: routerName,
+          ip: ipStr,
           domain: config.type === 'domain' ? config.domain : '',
           connectionType: config.type,
-          username: config.username,
+          username: config.saveUsername ? config.username : '',
           passwordEncrypted: config.savePassword ? config.password : '',
-          port: config.port,
+          port: config.port || 8728,
           useSsl: config.useSsl,
-          comment: config.comment,
+          comment: config.comment || info?.identity || '',
           fastLogin: config.fastLogin,
           turboMode: config.turboMode,
           lastConnected: new Date().toISOString(),
