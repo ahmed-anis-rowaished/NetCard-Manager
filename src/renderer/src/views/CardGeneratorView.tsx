@@ -120,6 +120,7 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
   const [selectedProfile, setSelectedProfile] = useState<string>('');
   const [umCustomer, setUmCustomer] = useState<string>('admin');
   const [customersList, setCustomersList] = useState<string[]>(['admin']);
+  const [umProfilesList, setUmProfilesList] = useState<UserManagerProfile[]>(userManagerProfiles);
   const [hotspotServers, setHotspotServers] = useState<string[]>(['all']);
   const [selectedHotspotServer, setSelectedHotspotServer] = useState<string>('all');
   const [selectedPosId, setSelectedPosId] = useState<number | undefined>(undefined);
@@ -160,9 +161,19 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
       }
     } else if (mode === 'usermanager') {
       if (userManagerProfiles.length > 0) {
+        setUmProfilesList(userManagerProfiles);
         setSelectedProfile(userManagerProfiles[0].name);
       }
       if (window.netcardAPI) {
+        window.netcardAPI.getUserManagerProfiles().then((profs: UserManagerProfile[]) => {
+          if (profs && profs.length > 0) {
+            setUmProfilesList(profs);
+            setSelectedProfile((prev) => {
+              const match = profs.find((p: UserManagerProfile) => p.name === prev);
+              return match ? match.name : profs[0].name;
+            });
+          }
+        });
         window.netcardAPI.getUserManagerCustomers().then((custs) => {
           if (custs && custs.length > 0) {
             setCustomersList(custs);
@@ -532,10 +543,10 @@ export const CardGeneratorView: React.FC<CardGeneratorViewProps> = ({
                     <option value="default">default (افتراضية)</option>
                   ))}
                 {mode === 'usermanager' &&
-                  (userManagerProfiles.length > 0 ? (
-                    userManagerProfiles.map((p) => (
+                  (umProfilesList.length > 0 ? (
+                    umProfilesList.map((p) => (
                       <option key={p.id} value={p.name}>
-                        {p.name} ({p.price} ريال)
+                        {p.name} {p.price ? `(${p.price} ريال)` : ''}
                       </option>
                     ))
                   ) : (

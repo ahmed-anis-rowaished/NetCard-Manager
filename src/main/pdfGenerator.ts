@@ -359,6 +359,9 @@ export class PdfGenerator {
       win.webContents.on('did-finish-load', async () => {
         if (finished) return;
         try {
+          // Give Chromium 300ms to complete layout calculation, font substitutions, and barcode rendering
+          await new Promise((resolve) => setTimeout(resolve, 300));
+
           const pdfBuffer = await win.webContents.printToPDF({
             pageSize: 'A4',
             printBackground: true,
@@ -375,11 +378,23 @@ export class PdfGenerator {
             fs.mkdirSync(outDir, { recursive: true });
           }
 
-          fs.writeFileSync(outputPath, pdfBuffer);
+          let finalPath = outputPath;
+          try {
+            fs.writeFileSync(finalPath, pdfBuffer);
+          } catch (writeErr: any) {
+            // If locked by another viewer, save with timestamp suffix rather than failing
+            if (writeErr.code === 'EBUSY' || writeErr.code === 'EPERM') {
+              finalPath = outputPath.replace(/\.pdf$/i, `_${Date.now()}.pdf`);
+              fs.writeFileSync(finalPath, pdfBuffer);
+            } else {
+              throw writeErr;
+            }
+          }
+
           finished = true;
           clearTimeout(timer);
           await cleanup();
-          resolve(outputPath);
+          resolve(finalPath);
         } catch (err) {
           finished = true;
           clearTimeout(timer);
@@ -459,8 +474,18 @@ export class PdfGenerator {
     }
 
     const pdfArrayBuffer = doc.output('arraybuffer');
-    fs.writeFileSync(outputPath, Buffer.from(pdfArrayBuffer));
-    return outputPath;
+    let finalPath = outputPath;
+    try {
+      fs.writeFileSync(finalPath, Buffer.from(pdfArrayBuffer));
+    } catch (writeErr: any) {
+      if (writeErr.code === 'EBUSY' || writeErr.code === 'EPERM') {
+        finalPath = outputPath.replace(/\.pdf$/i, `_${Date.now()}.pdf`);
+        fs.writeFileSync(finalPath, Buffer.from(pdfArrayBuffer));
+      } else {
+        throw writeErr;
+      }
+    }
+    return finalPath;
   }
 
   private static escapeHtml(str: string): string {

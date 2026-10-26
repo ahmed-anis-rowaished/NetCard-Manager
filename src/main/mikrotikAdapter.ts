@@ -625,35 +625,23 @@ export class MikroTikAdapter {
     if (!this.client || !this.osInfo) throw new Error('الراوتر غير متصل');
 
     const isV7 = this.osInfo.majorVersion === 7;
-    let added = 0;
     let failed = 0;
     const errors: string[] = [];
 
-    // In both v6 and v7, we prepare commands.
-    // In v7: Command 1: /user-manager/user/add, Command 2: /user-manager/user-profile/add
-    // In v6: Command 1: /tool/user-manager/user/add, Command 2: /tool/user-manager/user/create-and-activate-profile
-    const allCommands: string[][] = [];
-
+    // --- PHASE 1: Add User Accounts to MikroTik ---
+    // Prepare commands to create all users first so they are guaranteed to exist before profile assignment
+    const userCommands: string[][] = [];
     for (const card of cards) {
-      const profileToBind = options.profile || card.profile;
-
       if (isV7) {
         const userCmd = ['/user-manager/user/add', `=name=${card.username}`];
         if (card.password) userCmd.push(`=password=${card.password}`);
         if (card.sharedUsers) userCmd.push(`=shared-users=${card.sharedUsers}`);
         if (options.bindFirstMac) userCmd.push(`=caller-id=bind`);
-        userCmd.push(`=comment=NetCard_${card.batchId}`);
-        allCommands.push(userCmd);
-
-        if (profileToBind && profileToBind !== 'none') {
-          const profileCmd = [
-            '/user-manager/user-profile/add',
-            `=user=${card.username}`,
-            `=profile=${profileToBind}`,
-            `=comment=NetCard_${card.batchId}`,
-          ];
-          allCommands.push(profileCmd);
+        if (options.customer && options.customer !== 'admin' && options.customer !== 'default') {
+          userCmd.push(`=group=${options.customer}`);
         }
+        userCmd.push(`=comment=NetCard_${card.batchId}`);
+        userCommands.push(userCmd);
       } else {
         const userCmd = [
           '/tool/user-manager/user/add',
@@ -664,52 +652,91 @@ export class MikroTikAdapter {
         if (card.sharedUsers) userCmd.push(`=shared-users=${card.sharedUsers}`);
         if (options.bindFirstMac) userCmd.push(`=caller-id=bind`);
         userCmd.push(`=comment=NetCard_${card.batchId}`);
-        allCommands.push(userCmd);
+        userCommands.push(userCmd);
+      }
+    }
 
-        if (profileToBind && profileToBind !== 'none') {
-          const profileCmd = [
+    const addedCards: GeneratedCard[] = [];
+
+    if (options.turboMode) {
+      const concurrency = 8;
+      const userResults = await this.client.writeBatchSentences(userCommands, concurrency);
+      for (let i = 0; i < userResults.length; i++) {
+        const res = userResults[i];
+        const isTrap = res.some((r) => r.type === '!trap');
+        if (isTrap) {
+          failed++;
+          const trapMsg = res.find((r) => r.type === '!trap')?.attributes['message'] || 'خطأ في إضافة المستخدم باليوزر مانجر';
+          errors.push(trapMsg);
+        } else {
+          addedCards.push(cards[i]);
+        }
+      }
+    } else {
+      for (let i = 0; i < userCommands.length; i++) {
+        try {
+          await this.client.writeSentence(userCommands[i]);
+          addedCards.push(cards[i]);
+        } catch (e: any) {
+          failed++;
+          errors.push(e.message);
+        }
+        if (options.onProgress && (i % 4 === 0 || i === userCommands.length - 1)) {
+          options.onProgress(i + 1, cards.length);
+        }
+      }
+    }
+
+    if (options.onProgress) {
+      options.onProgress(addedCards.length, cards.length);
+    }
+
+    // --- PHASE 2: Assign & Bind Profiles to all successfully created users ---
+    const profileToBind = options.profile || (cards.length > 0 ? cards[0].profile : undefined);
+
+    if (profileToBind && profileToBind !== 'none' && addedCards.length > 0) {
+      const profileCommands: string[][] = addedCards.map((card) => {
+        if (isV7) {
+          // In RouterOS v7 User Manager: /user-manager/user-profile/add user=... profile=...
+          // CRITICAL: DO NOT pass =comment= as it is rejected by RouterOS v7 syntax
+          return [
+            '/user-manager/user-profile/add',
+            `=user=${card.username}`,
+            `=profile=${profileToBind}`,
+          ];
+        } else {
+          // In RouterOS v6 User Manager: /tool/user-manager/user/create-and-activate-profile
+          return [
             '/tool/user-manager/user/create-and-activate-profile',
             `=numbers=${card.username}`,
             `=customer=${options.customer || 'admin'}`,
             `=profile=${profileToBind}`,
           ];
-          allCommands.push(profileCmd);
+        }
+      });
+
+      if (options.turboMode) {
+        const concurrency = 6;
+        const profResults = await this.client.writeBatchSentences(profileCommands, concurrency);
+        for (const res of profResults) {
+          const isTrap = res.some((r) => r.type === '!trap');
+          if (isTrap) {
+            const trapMsg = res.find((r) => r.type === '!trap')?.attributes['message'] || 'تحذير أثناء تفعيل باقة اليوزر مانجر';
+            errors.push(trapMsg);
+          }
+        }
+      } else {
+        for (const cmd of profileCommands) {
+          try {
+            await this.client.writeSentence(cmd);
+          } catch (e: any) {
+            errors.push(e.message);
+          }
         }
       }
     }
 
-    if (options.turboMode) {
-      const concurrency = 8;
-      const results = await this.client.writeBatchSentences(allCommands, concurrency);
-      for (const res of results) {
-        const isTrap = res.some((r) => r.type === '!trap');
-        if (isTrap) {
-          failed++;
-          const trapMsg = res.find((r) => r.type === '!trap')?.attributes['message'] || 'خطأ في يوزر مانجر';
-          errors.push(trapMsg);
-        } else {
-          added++;
-        }
-      }
-      if (options.onProgress) {
-        options.onProgress(cards.length, cards.length);
-      }
-    } else {
-      for (let i = 0; i < allCommands.length; i++) {
-        try {
-          await this.client.writeSentence(allCommands[i]);
-          added++;
-        } catch (e: any) {
-          failed++;
-          errors.push(e.message);
-        }
-        if (options.onProgress && (i % 4 === 0 || i === allCommands.length - 1)) {
-          options.onProgress(Math.floor((i + 1) / 2), cards.length);
-        }
-      }
-    }
-
-    return { added: Math.round(added / (allCommands.length / cards.length)), failed, errors };
+    return { added: addedCards.length, failed, errors };
   }
 
   // ==================== BROADBAND / PPPoE ====================
