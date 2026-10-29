@@ -12,12 +12,14 @@ import {
   Cpu,
   Layers,
   LogOut,
+  Users,
 } from 'lucide-react';
 import { RouterOSInfo } from '../../../shared/types';
 
 export type AppView =
   | 'login'
   | 'dashboard'
+  | 'usermanager'
   | 'generator'
   | 'profiles'
   | 'templates'
@@ -87,6 +89,20 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <LayoutDashboard className="w-3.5 h-3.5" />
             <span>لوحة التحكم (Dashboard)</span>
+          </button>
+        )}
+
+        {isConnected && routerInfo?.majorVersion === 7 && (
+          <button
+            onClick={() => onNavigate('usermanager')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap shrink-0 ${
+              currentView === 'usermanager'
+                ? 'bg-gradient-to-r from-space-accent to-space-pink text-white shadow-neon-purple'
+                : 'text-purple-200 hover:text-white hover:bg-space-card'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5 text-space-pink" />
+            <span>يوزر مانجر (User Manager v7)</span>
           </button>
         )}
 

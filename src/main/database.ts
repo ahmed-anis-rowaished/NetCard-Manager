@@ -10,6 +10,7 @@ import {
   GeneratedCard,
   TemplateElementConfig,
   ProfileMetadata,
+  UserManagerV7UserItem,
 } from '../shared/types';
 import { DEFAULT_TEMPLATE, DEFAULT_ELEMENTS } from '../shared/defaults';
 
@@ -189,6 +190,30 @@ export class AppDatabase {
       CREATE TABLE IF NOT EXISTS app_settings (
         key TEXT PRIMARY KEY,
         value TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS userman_v7_users (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL,
+        password TEXT,
+        profile TEXT,
+        userProfileId TEXT,
+        groupName TEXT,
+        sharedUsers INTEGER DEFAULT 1,
+        callerId TEXT,
+        uptime TEXT,
+        uptimeLimit TEXT,
+        downloadBytes INTEGER DEFAULT 0,
+        uploadBytes INTEGER DEFAULT 0,
+        totalBytes INTEGER DEFAULT 0,
+        comment TEXT,
+        disabled INTEGER DEFAULT 0,
+        state TEXT DEFAULT 'waiting',
+        activeAddress TEXT,
+        activeUptime TEXT,
+        endTime TEXT,
+        routerIp TEXT,
+        updatedAt TEXT
       );
     `);
 
@@ -674,6 +699,149 @@ export class AppDatabase {
   public deleteProfileMetadata(mode: string, name: string): void {
     if (!this.db) return;
     this.db.run('DELETE FROM profile_metadata WHERE mode = ? AND name = ?', [mode, name]);
+    this.saveToFile();
+  }
+
+  // ==================== USER MANAGER V7 OFFLINE CACHE ====================
+
+  /**
+   * Caches a complete downloaded snapshot of User Manager v7 users for instant local filtering and zero CPU load on the router.
+   */
+  public cacheUserManagerV7Users(users: UserManagerV7UserItem[], routerIp: string): void {
+    if (!this.db) return;
+    const now = new Date().toISOString();
+
+    // Clear previous cache for this router IP (or all if empty)
+    if (routerIp) {
+      this.db.run('DELETE FROM userman_v7_users WHERE routerIp = ?', [routerIp]);
+    } else {
+      this.db.run('DELETE FROM userman_v7_users');
+    }
+
+    for (const u of users) {
+      this.db.run(
+        `INSERT OR REPLACE INTO userman_v7_users (
+          id, username, password, profile, userProfileId, groupName, sharedUsers,
+          callerId, uptime, uptimeLimit, downloadBytes, uploadBytes, totalBytes,
+          comment, disabled, state, activeAddress, activeUptime, endTime, routerIp, updatedAt
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          u.id,
+          u.username,
+          u.password || '',
+          u.profile || '',
+          u.userProfileId || '',
+          u.groupName || '',
+          u.sharedUsers || 1,
+          u.callerId || '',
+          u.uptime || '',
+          u.uptimeLimit || '',
+          u.downloadBytes || 0,
+          u.uploadBytes || 0,
+          u.totalBytes || 0,
+          u.comment || '',
+          u.disabled ? 1 : 0,
+          u.state || 'waiting',
+          u.activeAddress || '',
+          u.activeUptime || '',
+          u.endTime || '',
+          routerIp || '',
+          now,
+        ]
+      );
+    }
+    this.saveToFile();
+  }
+
+  /**
+   * Retrieves the locally cached User Manager v7 users instantly (< 5ms).
+   */
+  public getCachedUserManagerV7Users(routerIp?: string): UserManagerV7UserItem[] {
+    if (!this.db) return [];
+    let sql = 'SELECT * FROM userman_v7_users';
+    const params: any[] = [];
+    if (routerIp) {
+      sql += ' WHERE routerIp = ?';
+      params.push(routerIp);
+    }
+    sql += ' ORDER BY username ASC';
+
+    const res = this.db.exec(sql, params);
+    if (!res.length || !res[0].values) return [];
+    const cols = res[0].columns;
+    return res[0].values.map((row: any[]) => {
+      const obj: any = {};
+      cols.forEach((col, idx) => {
+        obj[col] = row[idx];
+      });
+      return {
+        ...obj,
+        disabled: Boolean(obj.disabled),
+        sharedUsers: Number(obj.sharedUsers) || 1,
+        downloadBytes: Number(obj.downloadBytes) || 0,
+        uploadBytes: Number(obj.uploadBytes) || 0,
+        totalBytes: Number(obj.totalBytes) || 0,
+      } as UserManagerV7UserItem;
+    });
+  }
+
+  /**
+   * Inserts a single newly added user into the local cache.
+   */
+  public addCachedUserManagerV7User(u: UserManagerV7UserItem): void {
+    if (!this.db) return;
+    const now = new Date().toISOString();
+    this.db.run(
+      `INSERT OR REPLACE INTO userman_v7_users (
+        id, username, password, profile, userProfileId, groupName, sharedUsers,
+        callerId, uptime, uptimeLimit, downloadBytes, uploadBytes, totalBytes,
+        comment, disabled, state, activeAddress, activeUptime, endTime, routerIp, updatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        u.id,
+        u.username,
+        u.password || '',
+        u.profile || '',
+        u.userProfileId || '',
+        u.groupName || '',
+        u.sharedUsers || 1,
+        u.callerId || '',
+        u.uptime || '',
+        u.uptimeLimit || '',
+        u.downloadBytes || 0,
+        u.uploadBytes || 0,
+        u.totalBytes || 0,
+        u.comment || '',
+        u.disabled ? 1 : 0,
+        u.state || 'waiting',
+        u.activeAddress || '',
+        u.activeUptime || '',
+        u.endTime || '',
+        u.routerIp || '',
+        now,
+      ]
+    );
+    this.saveToFile();
+  }
+
+  /**
+   * Updates a single user record in the local cache after a router command.
+   */
+  public updateCachedUserManagerV7User(u: Partial<UserManagerV7UserItem> & { id: string }): void {
+    if (!this.db || !u.id) return;
+    const existing = this.getCachedUserManagerV7Users().find((x) => x.id === u.id);
+    if (!existing) return;
+    const merged = { ...existing, ...u, updatedAt: new Date().toISOString() };
+    this.addCachedUserManagerV7User(merged);
+  }
+
+  /**
+   * Deletes one or more cached users locally.
+   */
+  public deleteCachedUserManagerV7Users(ids: string[]): void {
+    if (!this.db || !ids.length) return;
+    const placeholders = ids.map(() => '?').join(',');
+    this.db.run(`DELETE FROM userman_v7_users WHERE id IN (${placeholders})`, ids);
     this.saveToFile();
   }
 }

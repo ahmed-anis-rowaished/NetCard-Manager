@@ -7,6 +7,7 @@ import {
   CardBatchGenerationRequest,
   MndpDevice,
   GenerationProgress,
+  UserManagerV7UserItem,
 } from '../shared/types';
 
 const netcardAPI = {
@@ -81,6 +82,47 @@ const netcardAPI = {
   fileToDataUrl: (filePath: string) => ipcRenderer.invoke('system:fileToDataUrl', filePath),
   openPath: (targetPath: string) => ipcRenderer.invoke('system:openPath', targetPath),
   getFirewallProtectionScript: () => ipcRenderer.invoke('system:getFirewallProtectionScript'),
+
+  // User Manager v7 Offline Cache & Live Operations
+  syncUserManagerV7Users: (): Promise<{ success: boolean; count?: number; error?: string; users?: UserManagerV7UserItem[] }> =>
+    ipcRenderer.invoke('userman7:syncFromRouter'),
+  getCachedUserManagerV7Users: (): Promise<{ success: boolean; users: UserManagerV7UserItem[]; error?: string }> =>
+    ipcRenderer.invoke('userman7:getLocalUsers'),
+  addUserManagerV7User: (data: {
+    username: string;
+    password?: string;
+    profile?: string;
+    sharedUsers?: number;
+    callerId?: string;
+    comment?: string;
+    group?: string;
+  }): Promise<{ success: boolean; user?: UserManagerV7UserItem; error?: string }> =>
+    ipcRenderer.invoke('userman7:addUser', data),
+  updateUserManagerV7User: (
+    id: string,
+    username: string,
+    data: {
+      password?: string;
+      profile?: string;
+      sharedUsers?: number;
+      callerId?: string;
+      comment?: string;
+      disabled?: boolean;
+      group?: string;
+    }
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('userman7:updateUser', id, username, data),
+  deleteUserManagerV7Users: (ids: string[]): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('userman7:deleteUsers', ids),
+  setUserManagerV7UserDisabled: (ids: string[], disabled: boolean): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('userman7:setDisabled', ids, disabled),
+  assignUserManagerV7Profile: (
+    users: { id: string; username: string }[],
+    profileName: string
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('userman7:assignProfile', users, profileName),
+  disconnectUserManagerV7Session: (username: string, id: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('userman7:disconnectSession', username, id),
 };
 
 contextBridge.exposeInMainWorld('netcardAPI', netcardAPI);

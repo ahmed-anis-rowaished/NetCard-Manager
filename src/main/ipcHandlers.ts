@@ -15,6 +15,7 @@ import {
   POSLocation,
   CardBatchGenerationRequest,
   GenerationProgress,
+  UserManagerV7UserItem,
 } from '../shared/types';
 
 // Execution lock to prevent concurrent overlapping batch runs
@@ -539,5 +540,138 @@ export function setupIpcHandlers(
 
   ipcMain.handle('system:getFirewallProtectionScript', () => {
     return FirewallProtector.generateAntiGuessingScript();
+  });
+
+  // ==================== USER MANAGER V7 OFFLINE CACHE & OPERATIONS ====================
+
+  ipcMain.handle('userman7:syncFromRouter', async () => {
+    try {
+      if (!adapter.isConnected()) {
+        throw new Error('الراوتر غير متصل! يرجى الاتصال بالراوتر لمزامنة البيانات.');
+      }
+      const users = await adapter.fetchUserManagerV7UsersFull();
+      const cfg = adapter.getActiveConfig();
+      const ip = cfg?.type === 'ip' ? cfg.octets.join('.') : (cfg?.domain || '');
+      db.cacheUserManagerV7Users(users, ip || '');
+      return { success: true, count: users.length, users };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'فشل مزامنة مستخدمي اليوزر مانجر من الراوتر' };
+    }
+  });
+
+  ipcMain.handle('userman7:getLocalUsers', async () => {
+    try {
+      const cfg = adapter.getActiveConfig();
+      const ip = cfg?.type === 'ip' ? cfg.octets.join('.') : (cfg?.domain || '');
+      const users = db.getCachedUserManagerV7Users(ip || undefined);
+      return { success: true, users };
+    } catch (err: any) {
+      return { success: false, error: err.message, users: [] };
+    }
+  });
+
+  ipcMain.handle('userman7:addUser', async (_, data: {
+    username: string;
+    password?: string;
+    profile?: string;
+    sharedUsers?: number;
+    callerId?: string;
+    comment?: string;
+    group?: string;
+  }) => {
+    try {
+      if (!adapter.isConnected()) {
+        throw new Error('الراوتر غير متصل! يرجى الاتصال بالراوتر لإضافة المستخدم.');
+      }
+      const newUser = await adapter.addUserManagerV7SingleUser(data);
+      db.addCachedUserManagerV7User(newUser);
+      return { success: true, user: newUser };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'فشل إضافة المستخدم في الراوتر' };
+    }
+  });
+
+  ipcMain.handle('userman7:updateUser', async (_, id: string, username: string, data: {
+    password?: string;
+    profile?: string;
+    sharedUsers?: number;
+    callerId?: string;
+    comment?: string;
+    disabled?: boolean;
+    group?: string;
+  }) => {
+    try {
+      if (!adapter.isConnected()) {
+        throw new Error('الراوتر غير متصل!');
+      }
+      await adapter.updateUserManagerV7SingleUser(id, username, data);
+      db.updateCachedUserManagerV7User({ id, ...data });
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'فشل تعديل المستخدم في الراوتر' };
+    }
+  });
+
+  ipcMain.handle('userman7:deleteUsers', async (_, ids: string[]) => {
+    try {
+      if (!adapter.isConnected()) {
+        throw new Error('الراوتر غير متصل!');
+      }
+      await adapter.deleteUserManagerV7UsersBatch(ids);
+      db.deleteCachedUserManagerV7Users(ids);
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'فشل حذف المستخدمين من الراوتر' };
+    }
+  });
+
+  ipcMain.handle('userman7:setDisabled', async (_, ids: string[], disabled: boolean) => {
+    try {
+      if (!adapter.isConnected()) {
+        throw new Error('الراوتر غير متصل!');
+      }
+      await adapter.setUserManagerV7UserDisabled(ids, disabled);
+      for (const id of ids) {
+        db.updateCachedUserManagerV7User({ id, disabled, state: disabled ? 'disabled' : 'waiting' });
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'فشل تعديل حالة التفعيل' };
+    }
+  });
+
+  ipcMain.handle('userman7:assignProfile', async (_, users: { id: string; username: string }[], profileName: string) => {
+    try {
+      if (!adapter.isConnected()) {
+        throw new Error('الراوتر غير متصل!');
+      }
+      await adapter.assignUserManagerV7ProfileBatch(users.map((u) => u.username), profileName);
+      for (const u of users) {
+        db.updateCachedUserManagerV7User({ id: u.id, profile: profileName });
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'فشل ربط الباقة بالمستخدمين' };
+    }
+  });
+
+  ipcMain.handle('userman7:disconnectSession', async (_, username: string, id: string) => {
+    try {
+      if (!adapter.isConnected()) {
+        throw new Error('الراوتر غير متصل!');
+      }
+      await adapter.disconnectUserManagerV7Session(username);
+      if (id) {
+        db.updateCachedUserManagerV7User({
+          id,
+          state: 'waiting',
+          activeAddress: '',
+          activeUptime: '',
+        });
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'فشل فصل جلسة المستخدم' };
+    }
   });
 }

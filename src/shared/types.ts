@@ -134,6 +134,30 @@ export interface UserManagerProfile {
   uploadLimit?: string;
 }
 
+export interface UserManagerV7UserItem {
+  id: string; // Router .id (e.g. "*1")
+  username: string;
+  password?: string;
+  profile?: string;
+  userProfileId?: string;
+  groupName?: string;
+  sharedUsers: number;
+  callerId?: string; // Bound MAC or 'bind'
+  uptime?: string;
+  uptimeLimit?: string;
+  downloadBytes?: number;
+  uploadBytes?: number;
+  totalBytes?: number;
+  comment?: string;
+  disabled: boolean;
+  state: 'waiting' | 'running' | 'running-active' | 'used' | 'disabled';
+  activeAddress?: string;
+  activeUptime?: string;
+  endTime?: string;
+  routerIp?: string;
+  updatedAt?: string;
+}
+
 export interface PppProfile {
   id: string;
   name: string;

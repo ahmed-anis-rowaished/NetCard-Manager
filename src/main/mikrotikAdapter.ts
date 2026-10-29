@@ -9,6 +9,7 @@ import {
   ActiveSessionItem,
   DashboardData,
   CreateProfileParams,
+  UserManagerV7UserItem,
 } from '../shared/types';
 
 export class MikroTikAdapter {
@@ -210,6 +211,10 @@ export class MikroTikAdapter {
     }
     this.osInfo = null;
     this.activeConfig = null;
+  }
+
+  public getActiveConfig(): ConnectionConfig | null {
+    return this.activeConfig;
   }
 
   // ==================== HOTSPOT ====================
@@ -737,6 +742,331 @@ export class MikroTikAdapter {
     }
 
     return { added: addedCards.length, failed, errors };
+  }
+
+  // ==================== USER MANAGER V7 ADVANCED OPERATIONS ====================
+
+  /**
+   * Fetches full snapshot of User Manager v7 users, profiles, and active sessions from the router.
+   */
+  public async fetchUserManagerV7UsersFull(): Promise<UserManagerV7UserItem[]> {
+    if (!this.client || !this.osInfo) throw new Error('الراوتر غير متصل');
+
+    let userResults: SentenceResult[] = [];
+    try {
+      userResults = await this.client.writeSentence([
+        '/user-manager/user/print',
+        '=.proplist=.id,name,password,group,shared-users,caller-id,comment,disabled',
+      ]);
+    } catch (err: any) {
+      throw new Error(`فشل جلب مستخدمي اليوزر مانجر: ${err.message}`);
+    }
+
+    let profileResults: SentenceResult[] = [];
+    try {
+      profileResults = await this.client.writeSentence([
+        '/user-manager/user-profile/print',
+        '=.proplist=.id,user,profile,state,end-time',
+      ]);
+    } catch (e) {}
+
+    let sessionResults: SentenceResult[] = [];
+    try {
+      sessionResults = await this.client.writeSentence([
+        '/user-manager/session/print',
+        '=.proplist=.id,user,address,from-caller-id,uptime,download,upload',
+      ]);
+    } catch (e) {}
+
+    const userProfileMap = new Map<string, any>();
+    for (const p of profileResults.filter((r) => r.type === '!re')) {
+      const u = p.attributes['user'];
+      if (u) {
+        const existing = userProfileMap.get(u);
+        if (!existing || p.attributes['state'] === 'running' || existing['state'] !== 'running') {
+          userProfileMap.set(u, p.attributes);
+        }
+      }
+    }
+
+    const sessionMap = new Map<string, any>();
+    for (const s of sessionResults.filter((r) => r.type === '!re')) {
+      const u = s.attributes['user'];
+      if (u) {
+        sessionMap.set(u, s.attributes);
+      }
+    }
+
+    const routerIp =
+      this.activeConfig?.type === 'ip'
+        ? this.activeConfig.octets.join('.')
+        : this.activeConfig?.domain || '';
+
+    const items: UserManagerV7UserItem[] = [];
+    for (const u of userResults.filter((r) => r.type === '!re')) {
+      const uname = u.attributes['name'] || '';
+      const uid = u.attributes['.id'] || '';
+      const prof = userProfileMap.get(uname);
+      const sess = sessionMap.get(uname);
+
+      const isDisabled = u.attributes['disabled'] === 'true' || u.attributes['disabled'] === 'yes';
+      let state: 'waiting' | 'running' | 'running-active' | 'used' | 'disabled' = 'waiting';
+      if (isDisabled) {
+        state = 'disabled';
+      } else if (sess) {
+        state = 'running-active';
+      } else if (prof?.['state'] === 'running') {
+        state = 'running';
+      } else if (prof?.['state'] === 'used') {
+        state = 'used';
+      } else {
+        state = 'waiting';
+      }
+
+      const dl = parseInt(sess?.['download'] || '0', 10) || 0;
+      const ul = parseInt(sess?.['upload'] || '0', 10) || 0;
+
+      items.push({
+        id: uid,
+        username: uname,
+        password: u.attributes['password'] || '',
+        profile: prof?.['profile'] || '',
+        userProfileId: prof?.['.id'] || '',
+        groupName: u.attributes['group'] || '',
+        sharedUsers: parseInt(u.attributes['shared-users'] || '1', 10) || 1,
+        callerId: u.attributes['caller-id'] || sess?.['from-caller-id'] || '',
+        uptime: sess?.['uptime'] || '',
+        uptimeLimit: '',
+        downloadBytes: dl,
+        uploadBytes: ul,
+        totalBytes: dl + ul,
+        comment: u.attributes['comment'] || '',
+        disabled: isDisabled,
+        state,
+        activeAddress: sess?.['address'] || '',
+        activeUptime: sess?.['uptime'] || '',
+        endTime: prof?.['end-time'] || '',
+        routerIp,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    return items;
+  }
+
+  /**
+   * Adds a single User Manager v7 user to the router and assigns profile if provided.
+   */
+  public async addUserManagerV7SingleUser(data: {
+    username: string;
+    password?: string;
+    profile?: string;
+    sharedUsers?: number;
+    callerId?: string;
+    comment?: string;
+    group?: string;
+  }): Promise<UserManagerV7UserItem> {
+    if (!this.client) throw new Error('الراوتر غير متصل');
+
+    const userCmd = ['/user-manager/user/add', `=name=${data.username}`];
+    if (data.password) userCmd.push(`=password=${data.password}`);
+    if (data.sharedUsers) userCmd.push(`=shared-users=${data.sharedUsers}`);
+    if (data.callerId) userCmd.push(`=caller-id=${data.callerId}`);
+    if (data.comment) userCmd.push(`=comment=${data.comment}`);
+    if (data.group && data.group !== 'admin' && data.group !== 'default') {
+      userCmd.push(`=group=${data.group}`);
+    }
+
+    const res = await this.client.writeSentence(userCmd);
+    let routerId = '';
+    for (const s of res) {
+      if (s.attributes && s.attributes['ret']) {
+        routerId = s.attributes['ret'];
+        break;
+      }
+    }
+
+    if (!routerId) {
+      try {
+        const q = await this.client.writeSentence(['/user-manager/user/print', `?name=${data.username}`]);
+        const found = q.find((r) => r.type === '!re');
+        routerId = found?.attributes['.id'] || `*${Date.now()}`;
+      } catch {
+        routerId = `*${Date.now()}`;
+      }
+    }
+
+    let userProfileId = '';
+    if (data.profile && data.profile !== 'none') {
+      try {
+        const pRes = await this.client.writeSentence([
+          '/user-manager/user-profile/add',
+          `=user=${data.username}`,
+          `=profile=${data.profile}`,
+        ]);
+        for (const s of pRes) {
+          if (s.attributes && s.attributes['ret']) {
+            userProfileId = s.attributes['ret'];
+            break;
+          }
+        }
+      } catch (err: any) {
+        console.warn('Could not assign initial profile:', err.message);
+      }
+    }
+
+    const routerIp =
+      this.activeConfig?.type === 'ip'
+        ? this.activeConfig.octets.join('.')
+        : this.activeConfig?.domain || '';
+
+    return {
+      id: routerId,
+      username: data.username,
+      password: data.password || '',
+      profile: data.profile || '',
+      userProfileId,
+      groupName: data.group || '',
+      sharedUsers: data.sharedUsers || 1,
+      callerId: data.callerId || '',
+      uptime: '',
+      uptimeLimit: '',
+      downloadBytes: 0,
+      uploadBytes: 0,
+      totalBytes: 0,
+      comment: data.comment || '',
+      disabled: false,
+      state: 'waiting',
+      activeAddress: '',
+      activeUptime: '',
+      endTime: '',
+      routerIp,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Updates an existing User Manager v7 user on the router.
+   */
+  public async updateUserManagerV7SingleUser(
+    id: string,
+    username: string,
+    data: {
+      password?: string;
+      profile?: string;
+      sharedUsers?: number;
+      callerId?: string;
+      comment?: string;
+      disabled?: boolean;
+      group?: string;
+    }
+  ): Promise<void> {
+    if (!this.client) throw new Error('الراوتر غير متصل');
+
+    const cmd = ['/user-manager/user/set', `=.id=${id}`];
+    if (data.password !== undefined) cmd.push(`=password=${data.password}`);
+    if (data.sharedUsers !== undefined) cmd.push(`=shared-users=${data.sharedUsers}`);
+    if (data.callerId !== undefined) cmd.push(`=caller-id=${data.callerId}`);
+    if (data.comment !== undefined) cmd.push(`=comment=${data.comment}`);
+    if (data.disabled !== undefined) cmd.push(`=disabled=${data.disabled ? 'yes' : 'no'}`);
+    if (data.group !== undefined) cmd.push(`=group=${data.group}`);
+
+    await this.client.writeSentence(cmd);
+
+    // If profile assignment changed
+    if (data.profile !== undefined) {
+      try {
+        const pRes = await this.client.writeSentence([
+          '/user-manager/user-profile/print',
+          `?user=${username}`,
+        ]);
+        const profItems = pRes.filter((r) => r.type === '!re');
+        if (profItems.length > 0) {
+          if (!data.profile || data.profile === 'none') {
+            for (const item of profItems) {
+              await this.client.writeSentence(['/user-manager/user-profile/remove', `=.id=${item.attributes['.id']}`]);
+            }
+          } else {
+            await this.client.writeSentence([
+              '/user-manager/user-profile/set',
+              `=.id=${profItems[0].attributes['.id']}`,
+              `=profile=${data.profile}`,
+            ]);
+          }
+        } else if (data.profile && data.profile !== 'none') {
+          await this.client.writeSentence([
+            '/user-manager/user-profile/add',
+            `=user=${username}`,
+            `=profile=${data.profile}`,
+          ]);
+        }
+      } catch (e: any) {
+        console.warn('Failed to update user profile in router:', e.message);
+      }
+    }
+  }
+
+  /**
+   * Deletes a batch of User Manager v7 users.
+   */
+  public async deleteUserManagerV7UsersBatch(ids: string[]): Promise<void> {
+    if (!this.client) throw new Error('الراوتر غير متصل');
+    if (!ids.length) return;
+
+    const sentences = ids.map((id) => ['/user-manager/user/remove', `=.id=${id}`]);
+    await this.client.writeBatchSentences(sentences, 8);
+  }
+
+  /**
+   * Enables or disables users in batch.
+   */
+  public async setUserManagerV7UserDisabled(ids: string[], disabled: boolean): Promise<void> {
+    if (!this.client) throw new Error('الراوتر غير متصل');
+    if (!ids.length) return;
+
+    const sentences = ids.map((id) => [
+      '/user-manager/user/set',
+      `=.id=${id}`,
+      `=disabled=${disabled ? 'yes' : 'no'}`,
+    ]);
+    await this.client.writeBatchSentences(sentences, 8);
+  }
+
+  /**
+   * Assigns a profile to a batch of users.
+   */
+  public async assignUserManagerV7ProfileBatch(usernames: string[], profileName: string): Promise<void> {
+    if (!this.client) throw new Error('الراوتر غير متصل');
+    if (!usernames.length || !profileName) return;
+
+    const sentences = usernames.map((uname) => [
+      '/user-manager/user-profile/add',
+      `=user=${uname}`,
+      `=profile=${profileName}`,
+    ]);
+    await this.client.writeBatchSentences(sentences, 8);
+  }
+
+  /**
+   * Disconnects active session for a specific user.
+   */
+  public async disconnectUserManagerV7Session(username: string): Promise<void> {
+    if (!this.client) throw new Error('الراوتر غير متصل');
+    try {
+      const res = await this.client.writeSentence([
+        '/user-manager/session/print',
+        `?user=${username}`,
+      ]);
+      const sessions = res.filter((r) => r.type === '!re');
+      for (const s of sessions) {
+        const sid = s.attributes['.id'];
+        if (sid) {
+          await this.client.writeSentence(['/user-manager/session/remove', `=.id=${sid}`]);
+        }
+      }
+    } catch (e: any) {
+      throw new Error(`فشل فصل الجلسة: ${e.message}`);
+    }
   }
 
   // ==================== BROADBAND / PPPoE ====================

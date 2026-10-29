@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Navbar, AppView } from './components/Navbar';
 import { LoginView } from './views/LoginView';
 import { DashboardView } from './views/DashboardView';
+import { UserManagerV7View } from './views/UserManagerV7View';
 import { ProfilesManagerView } from './views/ProfilesManagerView';
 import { TemplateDesignerView } from './views/TemplateDesignerView';
 import { CardGeneratorView } from './views/CardGeneratorView';
@@ -120,6 +121,10 @@ export const App: React.FC = () => {
             onDisconnect={handleDisconnect}
             onNavigateToGenerator={() => setCurrentView('generator')}
           />
+        )}
+
+        {currentView === 'usermanager' && (
+          <UserManagerV7View isConnected={isConnected} />
         )}
 
         {currentView === 'generator' && (
